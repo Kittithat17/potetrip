@@ -43,6 +43,9 @@ type Input struct {
 	SpentAt   *time.Time   `json:"spent_at"` // defaults to now
 	MemberIDs []uuid.UUID  `json:"member_ids"`
 	Shares    []ShareInput `json:"shares"`
+	// SlipID links a parsed slip the user just reviewed (create only).
+	// Each slip can back at most one expense.
+	SlipID *uuid.UUID `json:"slip_id"`
 }
 
 // ShareInput is one member's portion for split_type=exact, in Currency minor units.
@@ -106,6 +109,15 @@ func (s *Service) Create(ctx context.Context, trip db.Trip, createdBy uuid.UUID,
 	var out View
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
+		if p.in.SlipID != nil {
+			n, err := q.ConfirmSlip(ctx, db.ConfirmSlipParams{ID: *p.in.SlipID, TripID: trip.ID})
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return apperr.Conflict("slip_unavailable", "สลิปนี้ถูกบันทึกไปแล้ว หรือไม่ได้อยู่ในทริปนี้")
+			}
+		}
 		e, err := q.CreateExpense(ctx, db.CreateExpenseParams{
 			TripID:     trip.ID,
 			Title:      p.in.Title,
@@ -117,6 +129,7 @@ func (s *Service) Create(ctx context.Context, trip db.Trip, createdBy uuid.UUID,
 			AmountBase: p.amountBase,
 			SplitType:  p.in.SplitType,
 			SpentAt:    *p.in.SpentAt,
+			SlipID:     p.in.SlipID,
 			CreatedBy:  createdBy,
 		})
 		if err != nil {

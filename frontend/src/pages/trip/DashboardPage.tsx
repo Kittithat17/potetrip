@@ -92,14 +92,12 @@ export function DashboardPage() {
           >
             + เพิ่มรายจ่าย
           </Link>
-          <button
-            disabled
-            title="จะมาในเวอร์ชันถัดไป"
-            className="relative flex min-h-14 items-center justify-center rounded-2xl bg-white font-medium text-slate-400 ring-1 ring-slate-200"
+          <Link
+            to={`${base}/scan`}
+            className="flex min-h-14 items-center justify-center rounded-2xl bg-white font-medium text-teal-800 shadow-sm ring-1 ring-teal-700/30 hover:bg-teal-50"
           >
             📷 สแกนสลิป
-            <span className="absolute -top-2 right-2 rounded-full bg-amber-100 px-2 text-[10px] text-amber-800">เร็วๆ นี้</span>
-          </button>
+          </Link>
         </div>
 
         <Card className="px-2">

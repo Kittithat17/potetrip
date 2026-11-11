@@ -11,6 +11,7 @@ import (
 
 	"github.com/raisin/travel-split/backend/internal/expense"
 	"github.com/raisin/travel-split/backend/internal/settlement"
+	"github.com/raisin/travel-split/backend/internal/slip"
 	"github.com/raisin/travel-split/backend/internal/trip"
 )
 
@@ -24,6 +25,7 @@ type Deps struct {
 	Trips       *trip.Service
 	Expenses    *expense.Service
 	Settlements *settlement.Service
+	Slips       *slip.Service // nil when no AI provider is configured
 	CORSOrigins []string
 }
 
@@ -71,6 +73,7 @@ func (s *Server) Routes() http.Handler {
 					r.Get("/balances", s.balances)
 					r.Get("/settlement", s.settlementPlan)
 					r.Post("/settlements/paid", s.markPaid)
+					r.Post("/slips", s.uploadSlips)
 				})
 			})
 		})

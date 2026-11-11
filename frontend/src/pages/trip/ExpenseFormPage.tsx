@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { useDeleteExpense, useExpense, useSaveExpense } from '../../api/hooks'
 import type { Category, Expense, ExpenseInput } from '../../api/types'
@@ -34,18 +34,37 @@ export function ExpenseFormPage() {
 
 type SplitMode = 'equal' | 'exact'
 
-function ExpenseForm({ existing }: { existing?: Expense }) {
+/** Prefilled values for a new expense, e.g. from a scanned slip. */
+export type ExpenseDraft = { title?: string; amount?: number | null; spentAt?: string | null; category?: Category }
+
+type FormProps = {
+  existing?: Expense
+  draft?: ExpenseDraft
+  slipId?: string
+  heading?: string
+  top?: ReactNode // shown above the fields
+  extraActions?: ReactNode // shown under the save button
+  onSaved?: () => void // defaults to returning to the dashboard
+}
+
+export function ExpenseForm({ existing, draft, slipId, heading, top, extraActions, onSaved }: FormProps) {
   const { trip, me, members, base } = useTrip()
   const navigate = useNavigate()
   const cur = trip.base_currency
   const save = useSaveExpense(trip.id, me.id, existing?.id)
   const del = useDeleteExpense(trip.id, me.id)
 
-  const [title, setTitle] = useState(existing?.title ?? '')
-  const [amountText, setAmountText] = useState(existing ? formatAmount(existing.amount, existing.currency, false) : '')
+  const [title, setTitle] = useState(existing?.title ?? draft?.title ?? '')
+  const [amountText, setAmountText] = useState(
+    existing
+      ? formatAmount(existing.amount, existing.currency, false)
+      : draft?.amount
+        ? formatAmount(draft.amount, cur, false)
+        : '',
+  )
   const [paidBy, setPaidBy] = useState(existing?.paid_by ?? me.id)
-  const [category, setCategory] = useState<Category>(existing?.category ?? 'food')
-  const [spentAt, setSpentAt] = useState(() => toLocalInput(existing?.spent_at ?? new Date()))
+  const [category, setCategory] = useState<Category>(existing?.category ?? draft?.category ?? 'food')
+  const [spentAt, setSpentAt] = useState(() => toLocalInput(existing?.spent_at ?? draft?.spentAt ?? new Date()))
   const [mode, setMode] = useState<SplitMode>(existing?.split_type === 'exact' ? 'exact' : 'equal')
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(existing ? existing.shares.map((s) => s.member_id) : members.map((m) => m.id)),
@@ -85,6 +104,7 @@ function ExpenseForm({ existing }: { existing?: Expense }) {
       currency: cur,
       split_type: mode,
       spent_at: fromLocalInput(spentAt),
+      slip_id: existing ? undefined : slipId,
     }
     if (mode === 'equal') {
       if (selected.size === 0) return setFormError('เลือกคนหารอย่างน้อย 1 คน')
@@ -94,7 +114,7 @@ function ExpenseForm({ existing }: { existing?: Expense }) {
       if (exactRemaining !== 0) return setFormError('ผลรวมของแต่ละคนต้องเท่ากับยอดทั้งหมด')
       body.shares = exactParsed.filter((x) => (x.v ?? 0) > 0).map((x) => ({ member_id: x.id, amount: x.v! }))
     }
-    save.mutate(body, { onSuccess: () => navigate(base) })
+    save.mutate(body, { onSuccess: () => (onSaved ? onSaved() : navigate(base)) })
   }
 
   const onDelete = () => {
@@ -104,7 +124,8 @@ function ExpenseForm({ existing }: { existing?: Expense }) {
 
   return (
     <Page>
-      <PageHeader title={existing ? 'แก้ไขรายจ่าย' : 'เพิ่มรายจ่าย'} back={base} />
+      <PageHeader title={heading ?? (existing ? 'แก้ไขรายจ่าย' : 'เพิ่มรายจ่าย')} back={base} />
+      {top}
       <form onSubmit={onSubmit} className="space-y-4">
         <Field label="รายการ">
           <TextInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น ราเมงมื้อเย็น" required maxLength={200} />
@@ -239,6 +260,7 @@ function ExpenseForm({ existing }: { existing?: Expense }) {
               ลบรายการนี้
             </Button>
           )}
+          {extraActions}
         </div>
       </form>
     </Page>

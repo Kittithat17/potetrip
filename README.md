@@ -3,7 +3,7 @@
 เว็บแอป (PWA) หารค่าใช้จ่ายตอนเที่ยวกับเพื่อน อ่านสลิปด้วย AI และรองรับหลายสกุลเงิน
 สเปกเต็มอยู่ที่ `TRAVEL_SPLIT_SPEC.md`
 
-> **สถานะ:** Milestone 2 (ทริปและการหารเงิน) เสร็จแล้ว สร้างทริป ชวนเพื่อน (หน้าแรกจำทริปที่เคยเข้าไว้ในเครื่อง) บันทึกรายจ่ายแบบหารเท่ากันหรือระบุยอด และดูว่าใครต้องโอนให้ใครได้ ยังรองรับเฉพาะสกุลเงินหลักของทริป (หลายสกุลเงินมาใน M4)
+> **สถานะ:** Milestone 3 (AI อ่านสลิป) เสร็จแล้ว สร้างทริป ชวนเพื่อน (หน้าแรกจำทริปที่เคยเข้าไว้ในเครื่อง) บันทึกรายจ่ายแบบหารเท่ากันหรือระบุยอด สแกนสลิปหลายรูปให้ AI อ่านแล้วตรวจก่อนบันทึก และดูว่าใครต้องโอนให้ใครได้ ยังรองรับเฉพาะสกุลเงินหลักของทริป (หลายสกุลเงินมาใน M4)
 
 ## สิ่งที่ต้องมีในเครื่อง
 
@@ -60,7 +60,8 @@ backend/
   internal/trip/      ทริปและสมาชิก
   internal/expense/   รายจ่าย + การแบ่งเงิน (Allocate/SplitEqual)
   internal/settlement/ คำนวณยอดสุทธิและรายการโอน (มี unit test ตามสเปกหัวข้อ 7)
-  internal/money/     ตารางสกุลเงินและจำนวนทศนิยม
+  internal/money/     ตารางสกุลเงิน จำนวนทศนิยม และ ParseDecimal
+  internal/slip/      Reader interface, GeminiReader, MockReader, RetryReader, ประมวลผลขนาน
   internal/apperr/    error ของ domain ที่ map เป็น HTTP status
   internal/testdb/    สร้าง schema ชั่วคราวสำหรับ integration test
   internal/http/      routes, middleware, handlers
@@ -75,7 +76,23 @@ frontend/
 docker-compose.yml    Postgres 17 สำหรับ dev
 ```
 
-## API (M2)
+## AI อ่านสลิป (M3)
+
+1. ขอ API key ฟรีที่ [Google AI Studio](https://aistudio.google.com/apikey)
+2. ใส่ใน `.env`:
+   ```
+   SLIP_PROVIDER=gemini
+   GEMINI_API_KEY=<key ของคุณ>
+   GEMINI_MODEL=<ชื่อรุ่น>
+   ```
+   ดูชื่อรุ่นและโควตาใน AI Studio โควตา free tier ของรุ่น Flash ค่อนข้างน้อย (มีรายงานว่าราว 20 ครั้งต่อวัน) ถ้าสแกนเยอะ รุ่น Flash-Lite มีโควตามากกว่า ไม่ต้องแก้โค้ด เปลี่ยนแค่ `GEMINI_MODEL`
+3. รัน `make dev` ใหม่ log จะขึ้น `slip reading enabled`
+
+ถ้ายังไม่มี key ตั้ง `SLIP_PROVIDER=mock` เพื่อลองหน้าจอด้วยผลตัวอย่าง (ร้าน "ตัวอย่าง (mock)" ฿1,250) ห้ามใช้ใน production ถ้าไม่ได้ตั้งค่าอะไรเลย แอปยังใช้งานได้ปกติ แค่ปุ่มสแกนจะแจ้งว่ายังไม่ได้ตั้งค่า AI
+
+**การทำงาน:** frontend ย่อรูปให้ด้านยาวไม่เกิน 1600px (และตัดข้อมูล EXIF เช่น GPS ออก) แล้วอัปโหลดทีละรูป ครั้งละไม่เกิน 3 รูปพร้อมกัน เพื่อแสดงสถานะของแต่ละรูป backend ตรวจชนิดไฟล์จากเนื้อไฟล์จริง (JPEG/PNG/WebP/HEIC ไม่เกิน 8MB) แล้วส่งให้ AI อ่านแบบขนาน จำกัดด้วย `SLIP_CONCURRENCY` ถ้าเจอ 429 จะ retry ด้วยระยะรอ 2s → 4s → 8s รูปไม่ถูกเก็บลงดิสก์หรือ DB เก็บแค่ผลที่อ่านได้ใน `slips.raw_result` ผู้ใช้ต้องกดบันทึกหรือข้ามทีละรายการ ระบบไม่บันทึกเอง และสลิปหนึ่งใบผูกกับรายจ่ายได้รายการเดียว
+
+## API (M2–M3)
 
 Base path `/api/v1` ทุก endpoint ใต้ `/trips/{tripId}` ยกเว้น `members` ต้องส่ง header `X-Member-Id` ของสมาชิกในทริปนั้น (ไม่ส่ง → 401, ไม่ใช่สมาชิก → 403)
 
@@ -90,6 +107,7 @@ Base path `/api/v1` ทุก endpoint ใต้ `/trips/{tripId}` ยกเว�
 | GET | `/trips/{tripId}/balances` | `net` บวก = ได้คืน, ลบ = ต้องจ่าย |
 | GET | `/trips/{tripId}/settlement` | รายการโอนที่น้อยที่สุด |
 | POST | `/trips/{tripId}/settlements/paid` | `{from, to, amount_base}` |
+| POST | `/trips/{tripId}/slips` | multipart ไฟล์รูปได้สูงสุด 10 รูป คืน `results[]` ที่มี `slip_id`, `result` (ผลดิบ), `suggestion` (ค่าแนะนำสำหรับฟอร์ม) ส่ง `slip_id` ตอนสร้างรายจ่ายเพื่อผูกสลิป |
 
 ตัวอย่างรายจ่าย (`amount` เป็นหน่วยย่อย 125000 = ฿1,250.00):
 

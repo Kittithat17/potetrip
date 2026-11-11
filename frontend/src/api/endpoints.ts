@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Balance, Expense, ExpenseInput, Member, Transfer, Trip } from './types'
+import type { Balance, Expense, ExpenseInput, Member, SlipOutcome, Transfer, Trip } from './types'
 
 export const createTrip = (body: { name: string; base_currency: string }) =>
   apiFetch<Trip>('/trips', { method: 'POST', body })
@@ -34,3 +34,12 @@ export const getSettlement = (tripId: string, me: string) =>
 
 export const markPaid = (tripId: string, me: string, body: Transfer) =>
   apiFetch<unknown>(`/trips/${tripId}/settlements/paid`, { method: 'POST', body, memberId: me })
+
+/** Uploads one image so the UI can show per-image progress; the API also accepts several at once. */
+export function uploadSlip(tripId: string, me: string, image: Blob, filename: string) {
+  const form = new FormData()
+  form.append('files', image, filename)
+  return apiFetch<{ results: SlipOutcome[] }>(`/trips/${tripId}/slips`, { method: 'POST', body: form, memberId: me }).then(
+    (r) => r.results[0],
+  )
+}

@@ -4,6 +4,7 @@ import { retryUnlessClientError } from './api/hooks'
 import { HomePage } from './pages/HomePage'
 import { DashboardPage } from './pages/trip/DashboardPage'
 import { ExpenseFormPage } from './pages/trip/ExpenseFormPage'
+import { ScanPage } from './pages/trip/ScanPage'
 import { SettlePage } from './pages/trip/SettlePage'
 import { TripLayout } from './pages/trip/TripLayout'
 
@@ -21,6 +22,7 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="expenses/new" element={<ExpenseFormPage />} />
             <Route path="expenses/:id" element={<ExpenseFormPage />} />
+            <Route path="scan" element={<ScanPage />} />
             <Route path="settle" element={<SettlePage />} />
           </Route>
         </Routes>

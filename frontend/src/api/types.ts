@@ -47,6 +47,7 @@ export type ExpenseInput = {
   spent_at?: string
   member_ids?: string[]
   shares?: { member_id: string; amount: number }[]
+  slip_id?: string
 }
 
 export type Balance = {
@@ -59,3 +60,35 @@ export type Balance = {
 }
 
 export type Transfer = { from: string; to: string; amount_base: number }
+
+export type SlipResult = {
+  kind: 'transfer_slip' | 'receipt' | 'unknown'
+  amount: string
+  currency: string
+  datetime: string
+  from_name: string
+  to_name: string
+  merchant: string
+  reference: string
+  category: string
+  items: { name: string; amount: string }[]
+  confidence: number
+}
+
+export type SlipSuggestion = {
+  title: string
+  amount: number | null
+  currency: string
+  spent_at: string | null
+  category: Category
+  low_confidence: boolean
+}
+
+export type SlipOutcome = {
+  filename: string
+  slip_id: string | null
+  status: 'parsed' | 'failed'
+  error?: string
+  result?: SlipResult
+  suggestion?: SlipSuggestion
+}
