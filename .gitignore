@@ -1,0 +1,23 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# go
+backend/bin/
+*.test
+coverage.out
+
+# node
+node_modules/
+frontend/dist/
+frontend/dev-dist/
+*.tsbuildinfo
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+
+# backups
+backups/
