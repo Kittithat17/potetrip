@@ -7,7 +7,7 @@ GOOSE    := cd backend && $(GO_TOOL) goose -dir migrations postgres "$(DATABASE_
 
 .PHONY: help setup dev dev-backend dev-frontend db-up db-down db-reset \
         migrate migrate-down migrate-status migrate-new sqlc test test-backend \
-        test-frontend lint build
+        test-frontend test-unit lint build
 
 help: ## แสดงคำสั่งทั้งหมด
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -56,8 +56,11 @@ sqlc: ## generate โค้ด Go จาก queries/*.sql
 
 test: test-backend test-frontend ## รัน test ทั้งหมด
 
-test-backend:
-	cd backend && go test ./...
+test-backend: db-up ## test backend (integration test ใช้ schema ชั่วคราวใน DB dev แล้วลบทิ้ง)
+	cd backend && TEST_DATABASE_URL="$(DATABASE_URL)" go test ./...
+
+test-unit: ## test backend เฉพาะส่วนที่ไม่ต้องใช้ DB
+	cd backend && TEST_DATABASE_URL= go test ./...
 
 test-frontend:
 	cd frontend && pnpm test

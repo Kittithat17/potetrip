@@ -27,7 +27,7 @@ func TestHealthz(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := NewServer(fakePinger{tc.pingErr}, []string{"http://localhost:5173"}).Routes()
+			h := NewServer(Deps{DB: fakePinger{tc.pingErr}}).Routes()
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
 			if rec.Code != tc.status {

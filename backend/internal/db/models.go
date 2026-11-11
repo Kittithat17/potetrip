@@ -23,7 +23,7 @@ type Expense struct {
 	AmountBase int64          `json:"amount_base"`
 	SplitType  string         `json:"split_type"`
 	SpentAt    time.Time      `json:"spent_at"`
-	SlipID     uuid.NullUUID  `json:"slip_id"`
+	SlipID     *uuid.UUID     `json:"slip_id"`
 	CreatedBy  uuid.UUID      `json:"created_by"`
 	CreatedAt  time.Time      `json:"created_at"`
 }
@@ -43,11 +43,11 @@ type ExpenseShare struct {
 }
 
 type Member struct {
-	ID        uuid.UUID   `json:"id"`
-	TripID    uuid.UUID   `json:"trip_id"`
-	Name      string      `json:"name"`
-	Promptpay pgtype.Text `json:"promptpay"`
-	CreatedAt time.Time   `json:"created_at"`
+	ID        uuid.UUID `json:"id"`
+	TripID    uuid.UUID `json:"trip_id"`
+	Name      string    `json:"name"`
+	Promptpay *string   `json:"promptpay"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type SettlementsPaid struct {
@@ -60,13 +60,13 @@ type SettlementsPaid struct {
 }
 
 type Slip struct {
-	ID         uuid.UUID   `json:"id"`
-	TripID     uuid.UUID   `json:"trip_id"`
-	UploadedBy uuid.UUID   `json:"uploaded_by"`
-	Status     string      `json:"status"`
-	RawResult  []byte      `json:"raw_result"`
-	Error      pgtype.Text `json:"error"`
-	CreatedAt  time.Time   `json:"created_at"`
+	ID         uuid.UUID `json:"id"`
+	TripID     uuid.UUID `json:"trip_id"`
+	UploadedBy uuid.UUID `json:"uploaded_by"`
+	Status     string    `json:"status"`
+	RawResult  []byte    `json:"raw_result"`
+	Error      *string   `json:"error"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type Trip struct {

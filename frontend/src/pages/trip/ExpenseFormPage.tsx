@@ -1,0 +1,246 @@
+import { useState, type FormEvent } from 'react'
+import { useNavigate, useParams } from 'react-router'
+import { useDeleteExpense, useExpense, useSaveExpense } from '../../api/hooks'
+import type { Category, Expense, ExpenseInput } from '../../api/types'
+import { Avatar, Button, ErrorText, Field, inputBase, inputClass, Page, PageHeader, Spinner, TextInput } from '../../components/ui'
+import { CATEGORIES } from '../../lib/categories'
+import { fromLocalInput, toLocalInput } from '../../lib/datetime'
+import { formatAmount, formatMoney, parseAmount, splitEqual } from '../../lib/money'
+import { useTrip } from './context'
+
+export function ExpenseFormPage() {
+  const { id } = useParams()
+  const { trip, me, base } = useTrip()
+  const q = useExpense(trip.id, me.id, id)
+
+  if (id && q.isPending) {
+    return (
+      <Page>
+        <Spinner />
+      </Page>
+    )
+  }
+  if (id && q.error) {
+    return (
+      <Page>
+        <PageHeader title="แก้ไขรายจ่าย" back={base} />
+        <ErrorText error={q.error} />
+      </Page>
+    )
+  }
+  // Re-mount the form once the expense loads so initial state is correct.
+  return <ExpenseForm key={q.data?.id ?? 'new'} existing={q.data} />
+}
+
+type SplitMode = 'equal' | 'exact'
+
+function ExpenseForm({ existing }: { existing?: Expense }) {
+  const { trip, me, members, base } = useTrip()
+  const navigate = useNavigate()
+  const cur = trip.base_currency
+  const save = useSaveExpense(trip.id, me.id, existing?.id)
+  const del = useDeleteExpense(trip.id, me.id)
+
+  const [title, setTitle] = useState(existing?.title ?? '')
+  const [amountText, setAmountText] = useState(existing ? formatAmount(existing.amount, existing.currency, false) : '')
+  const [paidBy, setPaidBy] = useState(existing?.paid_by ?? me.id)
+  const [category, setCategory] = useState<Category>(existing?.category ?? 'food')
+  const [spentAt, setSpentAt] = useState(() => toLocalInput(existing?.spent_at ?? new Date()))
+  const [mode, setMode] = useState<SplitMode>(existing?.split_type === 'exact' ? 'exact' : 'equal')
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(existing ? existing.shares.map((s) => s.member_id) : members.map((m) => m.id)),
+  )
+  const [exact, setExact] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      (existing?.split_type === 'exact' ? existing.shares : []).map((s) => [s.member_id, formatAmount(s.amount_base, cur, false)]),
+    ),
+  )
+  const [formError, setFormError] = useState('')
+
+  const amount = parseAmount(amountText, cur)
+  const selectedOrdered = members.filter((m) => selected.has(m.id))
+  const equalParts = amount ? splitEqual(amount, selectedOrdered.length) : []
+  const exactParsed = members.map((m) => ({ id: m.id, v: exact[m.id]?.trim() ? parseAmount(exact[m.id], cur) : 0 }))
+  const exactSum = exactParsed.reduce((s, x) => s + (x.v ?? 0), 0)
+  const exactRemaining = (amount ?? 0) - exactSum
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault()
+    setFormError('')
+    if (!amount) return setFormError('กรอกจำนวนเงินให้ถูกต้อง')
+
+    const body: ExpenseInput = {
+      title,
+      category,
+      paid_by: paidBy,
+      amount,
+      currency: cur,
+      split_type: mode,
+      spent_at: fromLocalInput(spentAt),
+    }
+    if (mode === 'equal') {
+      if (selected.size === 0) return setFormError('เลือกคนหารอย่างน้อย 1 คน')
+      body.member_ids = selectedOrdered.map((m) => m.id)
+    } else {
+      if (exactParsed.some((x) => x.v === null)) return setFormError('ยอดของบางคนไม่ถูกต้อง')
+      if (exactRemaining !== 0) return setFormError('ผลรวมของแต่ละคนต้องเท่ากับยอดทั้งหมด')
+      body.shares = exactParsed.filter((x) => (x.v ?? 0) > 0).map((x) => ({ member_id: x.id, amount: x.v! }))
+    }
+    save.mutate(body, { onSuccess: () => navigate(base) })
+  }
+
+  const onDelete = () => {
+    if (!existing || !confirm(`ลบ "${existing.title}" ใช่ไหม?`)) return
+    del.mutate(existing.id, { onSuccess: () => navigate(base) })
+  }
+
+  return (
+    <Page>
+      <PageHeader title={existing ? 'แก้ไขรายจ่าย' : 'เพิ่มรายจ่าย'} back={base} />
+      <form onSubmit={onSubmit} className="space-y-4">
+        <Field label="รายการ">
+          <TextInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น ราเมงมื้อเย็น" required maxLength={200} />
+        </Field>
+
+        <Field label="จำนวนเงิน" hint="หลายสกุลเงินจะมาในเวอร์ชันถัดไป">
+          <div className="flex gap-2">
+            <TextInput
+              value={amountText}
+              onChange={(e) => setAmountText(e.target.value)}
+              inputMode="decimal"
+              placeholder="0.00"
+              required
+              className="text-lg font-semibold tabular-nums"
+            />
+            <span className="flex min-h-11 w-20 shrink-0 items-center justify-center rounded-xl bg-slate-200 font-medium text-slate-600">{cur}</span>
+          </div>
+        </Field>
+
+        <Field label="ใครจ่าย">
+          <select value={paidBy} onChange={(e) => setPaidBy(e.target.value)} className={inputClass}>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+                {m.id === me.id ? ' (ฉัน)' : ''}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <fieldset>
+          <legend className="mb-1 text-sm font-medium text-slate-700">หมวดหมู่</legend>
+          <div className="grid grid-cols-3 gap-2">
+            {CATEGORIES.map((c) => (
+              <button
+                type="button"
+                key={c.value}
+                onClick={() => setCategory(c.value)}
+                aria-pressed={category === c.value}
+                className={`rounded-xl px-2 py-2 text-sm ring-1 ${
+                  category === c.value ? 'bg-teal-700 text-white ring-teal-700' : 'bg-white ring-slate-300'
+                }`}
+              >
+                <span className="block text-lg">{c.icon}</span>
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+
+        <Field label="วันเวลาที่จ่าย">
+          <TextInput type="datetime-local" value={spentAt} onChange={(e) => setSpentAt(e.target.value)} required />
+        </Field>
+
+        <fieldset className="space-y-3">
+          <legend className="mb-1 text-sm font-medium text-slate-700">วิธีหาร</legend>
+          <div className="grid grid-cols-3 rounded-xl bg-slate-200 p-1 text-sm">
+            {(
+              [
+                ['equal', 'เท่ากัน'],
+                ['exact', 'ระบุยอด'],
+              ] as const
+            ).map(([v, label]) => (
+              <button
+                type="button"
+                key={v}
+                onClick={() => setMode(v)}
+                aria-pressed={mode === v}
+                className={`rounded-lg py-2 ${mode === v ? 'bg-white font-medium shadow-sm' : 'text-slate-600'}`}
+              >
+                {label}
+              </button>
+            ))}
+            <button type="button" disabled className="rounded-lg py-2 text-slate-400" title="จะมาในเวอร์ชันถัดไป">
+              รายเมนู
+            </button>
+          </div>
+
+          {mode === 'equal' ? (
+            <ul className="divide-y divide-slate-100 rounded-2xl bg-white ring-1 ring-slate-200">
+              {members.map((m) => {
+                const idx = selectedOrdered.findIndex((x) => x.id === m.id)
+                return (
+                  <li key={m.id}>
+                    <label className="flex items-center gap-3 px-3 py-2">
+                      <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} className="size-5 accent-teal-700" />
+                      <Avatar name={m.name} size="sm" />
+                      <span className="flex-1">{m.name}</span>
+                      <span className="text-sm text-slate-500 tabular-nums">{idx >= 0 && amount ? formatMoney(equalParts[idx], cur) : ''}</span>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <>
+              <ul className="divide-y divide-slate-100 rounded-2xl bg-white ring-1 ring-slate-200">
+                {members.map((m) => (
+                  <li key={m.id} className="flex items-center gap-3 px-3 py-2">
+                    <Avatar name={m.name} size="sm" />
+                    <span className="flex-1">{m.name}</span>
+                    <input
+                      value={exact[m.id] ?? ''}
+                      onChange={(e) => setExact((p) => ({ ...p, [m.id]: e.target.value }))}
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      aria-label={`ยอดของ ${m.name}`}
+                      className={`${inputBase} w-28 shrink-0 text-right tabular-nums`}
+                    />
+                  </li>
+                ))}
+              </ul>
+              <p className={`text-right text-sm tabular-nums ${exactRemaining === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {exactRemaining === 0
+                  ? 'ครบพอดี ✓'
+                  : exactRemaining > 0
+                    ? `เหลืออีก ${formatMoney(exactRemaining, cur)}`
+                    : `เกินมา ${formatMoney(-exactRemaining, cur)}`}
+              </p>
+            </>
+          )}
+        </fieldset>
+
+        <ErrorText error={formError || save.error || del.error} />
+
+        <div className="space-y-2 pt-2">
+          <Button type="submit" className="w-full" disabled={save.isPending}>
+            {save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}
+          </Button>
+          {existing && (
+            <Button type="button" variant="danger" className="w-full" onClick={onDelete} disabled={del.isPending}>
+              ลบรายการนี้
+            </Button>
+          )}
+        </div>
+      </form>
+    </Page>
+  )
+}

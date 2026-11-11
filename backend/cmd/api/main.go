@@ -13,7 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/raisin/travel-split/backend/internal/config"
+	"github.com/raisin/travel-split/backend/internal/expense"
 	apihttp "github.com/raisin/travel-split/backend/internal/http"
+	"github.com/raisin/travel-split/backend/internal/settlement"
+	"github.com/raisin/travel-split/backend/internal/trip"
 )
 
 func main() {
@@ -39,8 +42,14 @@ func run() error {
 	defer pool.Close()
 
 	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
-		Handler:           apihttp.NewServer(pool, cfg.CORSOrigins).Routes(),
+		Addr: ":" + cfg.Port,
+		Handler: apihttp.NewServer(apihttp.Deps{
+			DB:          pool,
+			Trips:       trip.NewService(pool),
+			Expenses:    expense.NewService(pool),
+			Settlements: settlement.NewService(pool),
+			CORSOrigins: cfg.CORSOrigins,
+		}).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
