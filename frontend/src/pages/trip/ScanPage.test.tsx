@@ -1,12 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ConfirmProvider } from '../../components/ConfirmProvider'
+import { I18nProvider } from '../../i18n/I18nProvider'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { setMyMemberId } from '../../lib/identity'
+import { setIdentity } from '../../lib/identity'
 import { ScanPage } from './ScanPage'
 import { TripLayout } from './TripLayout'
 
-const trip = { id: 't1', name: 'โตเกียว', base_currency: 'THB', invite_code: 'ABCDEFGH23', created_at: '' }
+const trip = { id: 't1', name: 'โตเกียว', base_currency: 'THB', invite_code: 'ABCDEFGH23', owner_member_id: 'm1', created_at: '' }
 const members = [
   { id: 'm1', trip_id: 't1', name: 'แบงก์', promptpay: null, created_at: '' },
   { id: 'm2', trip_id: 't1', name: 'ฝน', promptpay: null, created_at: '' },
@@ -24,13 +26,15 @@ let posted: Record<string, unknown>[] = []
 
 beforeEach(() => {
   localStorage.clear()
-  setMyMemberId('t1', 'm1')
+  setIdentity('t1', { token: 'tok', memberId: 'm1' })
   posted = []
   let uploads = 0
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input)
-    if (url.endsWith('/trips/ABCDEFGH23')) return json(trip)
+    if (url.endsWith('/trips/ABCDEFGH23')) return json({ trip, members })
+    if (url.endsWith('/me')) return json({ status: 'approved', member: members[0], is_owner: true, request: {} })
     if (url.endsWith('/members')) return json(members)
+    if (url.endsWith('/join-requests')) return json([])
     if (url.endsWith('/slips')) return json({ results: [uploads++ === 0 ? parsed : failed] })
     if (url.endsWith('/expenses') && init?.method === 'POST') {
       posted.push(JSON.parse(String(init.body)))
@@ -44,7 +48,9 @@ afterEach(() => vi.restoreAllMocks())
 it('reads slips, then requires a decision on each before saving', async () => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const { container } = render(
-    <QueryClientProvider client={qc}>
+    <I18nProvider initialLang="th">
+      <ConfirmProvider>
+      <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={['/t/ABCDEFGH23/scan']}>
         <Routes>
           <Route path="/t/:code" element={<TripLayout />}>
@@ -52,7 +58,9 @@ it('reads slips, then requires a decision on each before saving', async () => {
           </Route>
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
+      </ConfirmProvider>
+    </I18nProvider>,
   )
 
   await screen.findByRole('button', { name: /เลือกรูป/ })

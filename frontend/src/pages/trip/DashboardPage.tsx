@@ -1,22 +1,32 @@
+import { ChevronLeft, ChevronRight, HandCoins, Plus, ScanLine, Settings2, Share2, UserPlus } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useBalances, useExpenses } from '../../api/hooks'
+import type { Category } from '../../api/types'
+import { Approx } from '../../components/Approx'
 import { ExpenseRow } from '../../components/ExpenseRow'
-import { Button, Card, ErrorText, Page, PageHeader, Spinner } from '../../components/ui'
+import { JoinRequestsCard } from './JoinRequestsCard'
+import { AppFrame, BlueHeader, IconAction, Sheet } from '../../components/shell'
+import { ErrorText, Spinner } from '../../components/ui'
 import { CATEGORIES } from '../../lib/categories'
 import { inviteLink } from '../../lib/invite'
 import { formatMoney } from '../../lib/money'
-import type { Category } from '../../api/types'
 import { useTrip } from './context'
+import { useI18n } from '../../i18n/context'
+import { useConfirm } from '../../lib/confirm'
+import { InviteDialog } from './InviteDialog'
 
 export function DashboardPage() {
-  const { trip, me, memberName, base, switchUser } = useTrip()
+  const { t } = useI18n()
+  const { trip, me, token, isOwner, members, memberName, base, leave, nav } = useTrip()
   const cur = trip.base_currency
-  const expensesQ = useExpenses(trip.id, me.id)
-  const balancesQ = useBalances(trip.id, me.id)
+  const expensesQ = useExpenses(trip.id, token)
+  const balancesQ = useBalances(trip.id, token)
   const [category, setCategory] = useState<Category | null>(null)
   const [onlyMine, setOnlyMine] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const confirm = useConfirm()
 
   const myBalance = balancesQ.data?.balances.find((b) => b.member_id === me.id)
   const expenses = expensesQ.data ?? []
@@ -31,96 +41,107 @@ export function DashboardPage() {
     const url = inviteLink(trip.invite_code)
     if (navigator.share) {
       try {
-        await navigator.share({ title: trip.name, text: `มาหารค่าใช้จ่ายทริป "${trip.name}" กัน`, url })
+        await navigator.share({ title: trip.name, text: t('trip.shareText', { name: trip.name }), url })
       } catch {
         /* user closed the share sheet */
       }
       return
     }
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // Clipboard and share need HTTPS; on plain http (e.g. testing over
-      // Wi-Fi) show the link so it can be copied by hand.
-      window.prompt('คัดลอกลิงก์นี้ส่งให้เพื่อน', url)
-    }
+    // No share sheet (desktop, or plain http): show our own invite dialog.
+    setInviteOpen(true)
+  }
+
+  const onLeave = async () => {
+    const ok = await confirm({ title: t('trip.leaveTitle'), message: t('trip.leaveConfirm'), confirmLabel: t('trip.leaveAction') })
+    if (ok) leave()
   }
 
   return (
-    <Page>
-      <PageHeader
-        title={trip.name}
-        back="/"
-        right={
-          <Button variant="ghost" className="min-h-9 px-3 text-sm" onClick={share}>
-            {copied ? 'คัดลอกแล้ว ✓' : 'ชวนเพื่อน'}
-          </Button>
-        }
-      />
-
-      <div className="space-y-4">
-        <Card className="bg-gradient-to-br from-teal-700 to-teal-900 text-white ring-0">
-          <div className="flex items-start justify-between">
-            <p className="text-sm text-teal-100">สวัสดี {me.name}</p>
-            <button onClick={switchUser} className="text-xs text-teal-200 underline">
-              ไม่ใช่ฉัน
-            </button>
-          </div>
-          {!myBalance ? (
-            <p className="mt-2 text-2xl font-bold">…</p>
-          ) : myBalance.net > 0 ? (
-            <>
-              <p className="mt-2 text-sm text-teal-100">คุณจะได้คืน</p>
-              <p className="text-3xl font-bold tabular-nums">{formatMoney(myBalance.net, cur)}</p>
-            </>
-          ) : myBalance.net < 0 ? (
-            <>
-              <p className="mt-2 text-sm text-teal-100">คุณต้องจ่ายเพื่อน</p>
-              <p className="text-3xl font-bold tabular-nums text-amber-200">{formatMoney(-myBalance.net, cur)}</p>
-            </>
-          ) : (
-            <p className="mt-2 text-2xl font-bold">เคลียร์ครบแล้ว 🎉</p>
-          )}
-          <div className="mt-3 flex items-center justify-between text-sm text-teal-100">
-            <span>ทั้งทริป {formatMoney(total, cur)}</span>
-            <Link to={`${base}/settle`} className="rounded-lg bg-white/15 px-3 py-1 font-medium text-white hover:bg-white/25">
-              ดูว่าใครโอนให้ใคร ›
-            </Link>
-          </div>
-        </Card>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Link
-            to={`${base}/expenses/new`}
-            className="flex min-h-14 items-center justify-center rounded-2xl bg-teal-700 font-medium text-white shadow-sm hover:bg-teal-800"
-          >
-            + เพิ่มรายจ่าย
+    <AppFrame nav={nav}>
+      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onCopied={() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }} />
+      <BlueHeader className="pb-20">
+        <div className="flex items-center gap-1">
+          <Link to="/trips" aria-label={t('trip.myTripsLabel')} className="-ml-2 rounded-full p-1 hover:bg-white/15">
+            <ChevronLeft className="size-7" />
           </Link>
-          <Link
-            to={`${base}/scan`}
-            className="flex min-h-14 items-center justify-center rounded-2xl bg-white font-medium text-teal-800 shadow-sm ring-1 ring-teal-700/30 hover:bg-teal-50"
-          >
-            📷 สแกนสลิป
+          <h1 className="min-w-0 flex-1 truncate text-xl font-bold">{trip.name}</h1>
+          <button onClick={share} className="flex items-center gap-1 rounded-full bg-white/15 px-3 py-1.5 text-sm hover:bg-white/25">
+            <Share2 className="size-4" />
+            {copied ? t('trip.copied') : t('trip.invite')}
+          </button>
+          <Link to={`${base}/edit`} aria-label={t('trip.settingsLabel')} className="rounded-full bg-white/15 p-2 hover:bg-white/25">
+            <Settings2 className="size-4" />
           </Link>
         </div>
 
-        <Card className="px-2">
+        <div className="mt-4 flex items-end justify-between">
+          <div>
+            <p className="text-sm text-brand-100">
+              {t('trip.hello', { name: me.name })}{' '}
+              <button
+                onClick={onLeave}
+                className="ml-1 text-xs text-brand-200 underline"
+              >
+                {t('trip.notMe')}
+              </button>
+            </p>
+            {!myBalance ? (
+              <p className="mt-1 text-3xl font-bold">…</p>
+            ) : myBalance.net > 0 ? (
+              <>
+                <p className="mt-1 text-sm text-brand-100">{t('trip.getsBack')}</p>
+                <p className="text-4xl font-bold tabular-nums">{formatMoney(myBalance.net, cur)}</p>
+                <Approx minor={myBalance.net} currency={cur} className="text-sm text-brand-100" />
+              </>
+            ) : myBalance.net < 0 ? (
+              <>
+                <p className="mt-1 text-sm text-brand-100">{t('trip.owes')}</p>
+                <p className="text-4xl font-bold text-amber-200 tabular-nums">{formatMoney(-myBalance.net, cur)}</p>
+                <Approx minor={-myBalance.net} currency={cur} className="text-sm text-brand-100" />
+              </>
+            ) : (
+              <p className="mt-1 text-2xl font-bold">{t('trip.settled')}</p>
+            )}
+          </div>
+          <div className="text-right text-xs text-brand-100">
+            <p>{t('trip.total')}</p>
+            <p className="text-base font-semibold text-white tabular-nums">{formatMoney(total, cur)}</p>
+            <Approx minor={total} currency={cur} className="text-xs text-brand-100" />
+            <p>{members.length === 1 ? t('trip.peopleOne') : t('trip.people', { n: members.length })}</p>
+          </div>
+        </div>
+      </BlueHeader>
+
+      <main className="mx-auto -mt-14 max-w-md space-y-4 px-4">
+        <Sheet>
+          <div className="grid grid-cols-4 gap-2">
+            <IconAction icon={Plus} label={t('trip.addExpense')} to={`${base}/expenses/new`} />
+            <IconAction icon={ScanLine} label={t('trip.scanSlip')} to={`${base}/scan`} />
+            <IconAction icon={HandCoins} label={t('trip.settle')} to={`${base}/settle`} />
+            <IconAction icon={UserPlus} label={t('trip.invite')} onClick={share} />
+          </div>
+        </Sheet>
+
+        {isOwner && <JoinRequestsCard />}
+
+        <section className="rounded-3xl bg-white px-2 pt-4 pb-2 shadow-sm ring-1 ring-slate-200/70">
           <div className="flex items-center justify-between px-2">
-            <h2 className="font-bold">รายจ่ายล่าสุด</h2>
+            <h2 className="text-lg font-bold">{t('trip.recent')}</h2>
             <label className="flex items-center gap-1 text-sm text-slate-600">
-              <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} className="accent-teal-700" />
-              เฉพาะที่เกี่ยวกับฉัน
+              <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} className="accent-brand-600" />
+              {t('trip.onlyMine')}
             </label>
           </div>
-          <div className="mt-2 flex gap-2 overflow-x-auto px-2 pb-1">
+          <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto px-2 pb-1">
             <Chip active={!category} onClick={() => setCategory(null)}>
-              ทั้งหมด
+              {t('trip.all')}
             </Chip>
             {CATEGORIES.map((c) => (
               <Chip key={c.value} active={category === c.value} onClick={() => setCategory(c.value)}>
-                {c.icon} {c.label}
+                <c.icon className="size-4" /> {t(c.labelKey)}
               </Chip>
             ))}
           </div>
@@ -132,9 +153,18 @@ export function DashboardPage() {
               <ErrorText error={expensesQ.error} />
             </div>
           ) : visible.length === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-500">
-              {expenses.length === 0 ? 'ยังไม่มีรายจ่าย เริ่มเพิ่มรายการแรกได้เลย' : 'ไม่มีรายการที่ตรงกับตัวกรอง'}
-            </p>
+            <div className="py-10 text-center text-sm text-slate-500">
+              {expenses.length === 0 ? (
+                <>
+                  <p>{t('trip.noExpenses')}</p>
+                  <Link to={`${base}/expenses/new`} className="mt-2 inline-flex items-center text-brand-600">
+                    {t('trip.addFirst')} <ChevronRight className="size-4" />
+                  </Link>
+                </>
+              ) : (
+                t('trip.noMatch')
+              )}
+            </div>
           ) : (
             <ul className="mt-1 divide-y divide-slate-100">
               {visible.map((e) => (
@@ -149,9 +179,9 @@ export function DashboardPage() {
               ))}
             </ul>
           )}
-        </Card>
-      </div>
-    </Page>
+        </section>
+      </main>
+    </AppFrame>
   )
 }
 
@@ -159,7 +189,9 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   return (
     <button
       onClick={onClick}
-      className={`shrink-0 rounded-full px-3 py-1 text-sm ${active ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-700'}`}
+      className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-sm ${
+        active ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700'
+      }`}
     >
       {children}
     </button>

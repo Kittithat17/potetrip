@@ -3,8 +3,24 @@ export type Trip = {
   name: string
   base_currency: string
   invite_code: string
+  owner_member_id: string | null
   created_at: string
 }
+
+/** What anyone with the invite code can see about a member. */
+export type PublicMember = { id: string; name: string }
+
+export type JoinStatus = 'pending' | 'approved' | 'rejected'
+
+export type JoinRequest = {
+  id: string
+  status: JoinStatus
+  requested_name: string
+  requested_member_id: string | null // set when claiming an existing name
+  created_at: string
+}
+
+export type Me = { status: JoinStatus; request: JoinRequest; member: Member | null; is_owner: boolean }
 
 export type Member = {
   id: string
@@ -76,7 +92,8 @@ export type SlipResult = {
 }
 
 export type SlipSuggestion = {
-  title: string
+  title: string // merchant or transfer receiver; see title_kind
+  title_kind: 'merchant' | 'transfer_to' | 'none'
   amount: number | null
   currency: string
   spent_at: string | null
@@ -88,6 +105,7 @@ export type SlipOutcome = {
   filename: string
   slip_id: string | null
   status: 'parsed' | 'failed'
+  error_code?: string
   error?: string
   result?: SlipResult
   suggestion?: SlipSuggestion

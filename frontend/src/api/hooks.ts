@@ -24,33 +24,71 @@ export function useTripByInvite(code: string) {
   return useQuery({ queryKey: keys.invite(code), queryFn: () => api.getTripByInvite(code), retry: retryUnlessClientError })
 }
 
-export function useMembers(tripId: string | undefined) {
+export function useMe(tripId: string | undefined, token: string | undefined) {
+  return useQuery({
+    queryKey: [...keys.trip(tripId ?? ''), 'me', token],
+    queryFn: () => api.getMe(tripId!, token!),
+    enabled: !!tripId && !!token,
+    // A pending device watches closely for the owner's decision.
+    refetchInterval: (q) => (q.state.data?.status === 'pending' ? 4_000 : 30_000),
+  })
+}
+
+export function useMembers(tripId: string | undefined, token: string | undefined) {
   return useQuery({
     queryKey: keys.members(tripId ?? ''),
-    queryFn: () => api.listMembers(tripId!),
-    enabled: !!tripId,
+    queryFn: () => api.listMembers(tripId!, token!),
+    enabled: !!tripId && !!token,
     refetchInterval: POLL,
   })
 }
 
-export function useExpenses(tripId: string, me: string) {
-  return useQuery({ queryKey: keys.expenses(tripId), queryFn: () => api.listExpenses(tripId, me), refetchInterval: POLL })
+export function useUpdateTrip(tripId: string, token: string, inviteCode: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { name?: string; base_currency?: string }) => api.updateTrip(tripId, token, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.invite(inviteCode) })
+      qc.invalidateQueries({ queryKey: keys.trip(tripId) })
+    },
+  })
 }
 
-export function useExpense(tripId: string, me: string, id: string | undefined) {
+export function useJoinRequests(tripId: string, token: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...keys.trip(tripId), 'join-requests'],
+    queryFn: () => api.listJoinRequests(tripId, token),
+    enabled,
+    refetchInterval: POLL,
+  })
+}
+
+export function useDecideJoin(tripId: string, token: string) {
+  const invalidate = useInvalidateTrip(tripId)
+  return useMutation({
+    mutationFn: ({ id, decision }: { id: string; decision: 'approve' | 'reject' }) => api.decideJoin(tripId, token, id, decision),
+    onSuccess: invalidate,
+  })
+}
+
+export function useExpenses(tripId: string, token: string) {
+  return useQuery({ queryKey: keys.expenses(tripId), queryFn: () => api.listExpenses(tripId, token), refetchInterval: POLL })
+}
+
+export function useExpense(tripId: string, token: string, id: string | undefined) {
   return useQuery({
     queryKey: keys.expense(tripId, id ?? ''),
-    queryFn: () => api.getExpense(tripId, me, id!),
+    queryFn: () => api.getExpense(tripId, token, id!),
     enabled: !!id,
   })
 }
 
-export function useBalances(tripId: string, me: string) {
-  return useQuery({ queryKey: keys.balances(tripId), queryFn: () => api.getBalances(tripId, me), refetchInterval: POLL })
+export function useBalances(tripId: string, token: string) {
+  return useQuery({ queryKey: keys.balances(tripId), queryFn: () => api.getBalances(tripId, token), refetchInterval: POLL })
 }
 
-export function useSettlement(tripId: string, me: string) {
-  return useQuery({ queryKey: keys.settlement(tripId), queryFn: () => api.getSettlement(tripId, me), refetchInterval: POLL })
+export function useSettlement(tripId: string, token: string) {
+  return useQuery({ queryKey: keys.settlement(tripId), queryFn: () => api.getSettlement(tripId, token), refetchInterval: POLL })
 }
 
 /** Any write may change balances, so refresh everything under the trip. */
@@ -59,29 +97,21 @@ function useInvalidateTrip(tripId: string) {
   return () => qc.invalidateQueries({ queryKey: keys.trip(tripId) })
 }
 
-export function useAddMember(tripId: string) {
-  const invalidate = useInvalidateTrip(tripId)
-  return useMutation({
-    mutationFn: (body: { name: string; promptpay?: string | null }) => api.addMember(tripId, body),
-    onSuccess: invalidate,
-  })
-}
-
-export function useSaveExpense(tripId: string, me: string, id?: string) {
+export function useSaveExpense(tripId: string, token: string, id?: string) {
   const invalidate = useInvalidateTrip(tripId)
   return useMutation({
     mutationFn: (body: ExpenseInput) =>
-      id ? api.updateExpense(tripId, me, id, body) : api.createExpense(tripId, me, body),
+      id ? api.updateExpense(tripId, token, id, body) : api.createExpense(tripId, token, body),
     onSuccess: invalidate,
   })
 }
 
-export function useDeleteExpense(tripId: string, me: string) {
+export function useDeleteExpense(tripId: string, token: string) {
   const invalidate = useInvalidateTrip(tripId)
-  return useMutation({ mutationFn: (id: string) => api.deleteExpense(tripId, me, id), onSuccess: invalidate })
+  return useMutation({ mutationFn: (id: string) => api.deleteExpense(tripId, token, id), onSuccess: invalidate })
 }
 
-export function useMarkPaid(tripId: string, me: string) {
+export function useMarkPaid(tripId: string, token: string) {
   const invalidate = useInvalidateTrip(tripId)
-  return useMutation({ mutationFn: (t: Transfer) => api.markPaid(tripId, me, t), onSuccess: invalidate })
+  return useMutation({ mutationFn: (t: Transfer) => api.markPaid(tripId, token, t), onSuccess: invalidate })
 }

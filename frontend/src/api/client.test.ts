@@ -4,17 +4,17 @@ import { ApiError, apiFetch } from './client'
 afterEach(() => vi.restoreAllMocks())
 
 describe('apiFetch', () => {
-  it('sends JSON body and member header', async () => {
+  it('sends JSON body and device token', async () => {
     const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     )
-    const out = await apiFetch<{ ok: boolean }>('/x', { method: 'POST', body: { a: 1 }, memberId: 'm1' })
+    const out = await apiFetch<{ ok: boolean }>('/x', { method: 'POST', body: { a: 1 }, token: 'secret' })
 
     expect(out).toEqual({ ok: true })
     const [url, init] = spy.mock.calls[0]
     expect(String(url)).toMatch(/\/x$/)
     const headers = init?.headers as Headers
-    expect(headers.get('X-Member-Id')).toBe('m1')
+    expect(headers.get('X-Device-Token')).toBe('secret')
     expect(headers.get('Content-Type')).toBe('application/json')
     expect(init?.body).toBe('{"a":1}')
   })

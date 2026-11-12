@@ -12,13 +12,14 @@ export class ApiError extends Error {
   }
 }
 
-type Options = Omit<RequestInit, 'body'> & { body?: unknown; memberId?: string | null }
+/** `token` is the device's secret for the trip, sent as X-Device-Token. */
+type Options = Omit<RequestInit, 'body'> & { body?: unknown; token?: string | null }
 
 export async function apiFetch<T>(path: string, opts: Options = {}): Promise<T> {
-  const { body, memberId, headers, ...rest } = opts
+  const { body, token, headers, ...rest } = opts
   const h = new Headers(headers)
   if (body !== undefined && !(body instanceof FormData)) h.set('Content-Type', 'application/json')
-  if (memberId) h.set('X-Member-Id', memberId)
+  if (token) h.set('X-Device-Token', token)
 
   let res: Response
   try {
@@ -28,7 +29,7 @@ export async function apiFetch<T>(path: string, opts: Options = {}): Promise<T> 
       body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
     })
   } catch {
-    throw new ApiError(0, 'network_error', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
+    throw new ApiError(0, 'network_error', "Can't reach the server")
   }
 
   if (!res.ok) {

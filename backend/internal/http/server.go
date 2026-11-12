@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/cors"
 
 	"github.com/raisin/travel-split/backend/internal/expense"
+	"github.com/raisin/travel-split/backend/internal/fx"
 	"github.com/raisin/travel-split/backend/internal/settlement"
 	"github.com/raisin/travel-split/backend/internal/slip"
 	"github.com/raisin/travel-split/backend/internal/trip"
@@ -26,6 +27,7 @@ type Deps struct {
 	Expenses    *expense.Service
 	Settlements *settlement.Service
 	Slips       *slip.Service // nil when no AI provider is configured
+	FX          *fx.Service
 	CORSOrigins []string
 }
 
@@ -42,8 +44,8 @@ func (s *Server) Routes() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: s.CORSOrigins,
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Content-Type", "X-Member-Id"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type", TokenHeader},
 		MaxAge:         300,
 	}))
 
@@ -51,6 +53,8 @@ func (s *Server) Routes() http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/healthz", s.healthz)
 		r.Post("/trips", s.createTrip)
+		r.Get("/fx", s.fxRate)
+		r.Get("/fx/currencies", s.fxCurrencies)
 
 		// {trip} is an invite code on GET /trips/{trip} and a trip UUID below it.
 		r.Route("/trips/{trip}", func(r chi.Router) {
@@ -58,22 +62,34 @@ func (s *Server) Routes() http.Handler {
 
 			r.Group(func(r chi.Router) {
 				r.Use(s.loadTrip)
-				// Open to anyone holding the trip ID: a newcomer must see
-				// the member list (and add themselves) before having an ID.
-				r.Get("/members", s.listMembers)
-				r.Post("/members", s.addMember)
+				// Anyone holding the trip ID may ask to join; nothing else.
+				r.Post("/join", s.requestJoin)
 
 				r.Group(func(r chi.Router) {
-					r.Use(s.requireMember)
-					r.Get("/expenses", s.listExpenses)
-					r.Post("/expenses", s.createExpense)
-					r.Get("/expenses/{expense}", s.getExpense)
-					r.Put("/expenses/{expense}", s.updateExpense)
-					r.Delete("/expenses/{expense}", s.deleteExpense)
-					r.Get("/balances", s.balances)
-					r.Get("/settlement", s.settlementPlan)
-					r.Post("/settlements/paid", s.markPaid)
-					r.Post("/slips", s.uploadSlips)
+					r.Use(s.requireDevice)
+					r.Get("/me", s.me) // pending devices poll this
+
+					r.Group(func(r chi.Router) {
+						r.Use(s.requireMember)
+						r.Get("/members", s.listMembers)
+						r.Get("/expenses", s.listExpenses)
+						r.Post("/expenses", s.createExpense)
+						r.Get("/expenses/{expense}", s.getExpense)
+						r.Put("/expenses/{expense}", s.updateExpense)
+						r.Delete("/expenses/{expense}", s.deleteExpense)
+						r.Get("/balances", s.balances)
+						r.Get("/settlement", s.settlementPlan)
+						r.Post("/settlements/paid", s.markPaid)
+						r.Post("/slips", s.uploadSlips)
+
+						r.Group(func(r chi.Router) {
+							r.Use(s.requireOwner)
+							r.Patch("/", s.updateTrip)
+							r.Get("/join-requests", s.listJoinRequests)
+							r.Post("/join-requests/{request}/approve", s.approveJoin)
+							r.Post("/join-requests/{request}/reject", s.rejectJoin)
+						})
+					})
 				})
 			})
 		})

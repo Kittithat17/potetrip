@@ -1,138 +1,130 @@
-import { useMutation } from '@tanstack/react-query'
-import { useState, type FormEvent } from 'react'
+import { ChevronRight, CircleHelp, Luggage, Plus, Search, Ticket } from 'lucide-react'
+import { useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { addMember, createTrip } from '../api/endpoints'
 import { HealthBadge } from '../components/HealthBadge'
-import { Avatar, Button, Card, ErrorText, Field, inputClass, Page, TextInput } from '../components/ui'
-import { setMyMemberId } from '../lib/identity'
+import { AppFrame, BlueHeader, IconAction, Sheet, TripCover } from '../components/shell'
+import { useI18n } from '../i18n/context'
+import { mainNav } from '../lib/nav'
 import { parseInviteInput } from '../lib/invite'
-import { forgetTrip, getRecentTrips, type RecentTrip } from '../lib/recentTrips'
-import { CURRENCIES } from '../lib/money'
+import { getRecentTrips } from '../lib/recentTrips'
 
 export function HomePage() {
+  const { t } = useI18n()
   const navigate = useNavigate()
-  const [tripName, setTripName] = useState('')
-  const [currency, setCurrency] = useState('THB')
-  const [myName, setMyName] = useState('')
   const [invite, setInvite] = useState('')
   const [inviteError, setInviteError] = useState('')
-  const [recent, setRecent] = useState<RecentTrip[]>(getRecentTrips)
-
-  const create = useMutation({
-    mutationFn: async () => {
-      const trip = await createTrip({ name: tripName, base_currency: currency })
-      const me = await addMember(trip.id, { name: myName })
-      setMyMemberId(trip.id, me.id)
-      return trip
-    },
-    onSuccess: (trip) => navigate(`/t/${trip.invite_code}`),
-  })
-
-  const onCreate = (e: FormEvent) => {
-    e.preventDefault()
-    create.mutate()
-  }
+  const [showHelp, setShowHelp] = useState(false)
+  const inviteRef = useRef<HTMLInputElement>(null)
+  const recent = getRecentTrips()
 
   const onJoin = (e: FormEvent) => {
     e.preventDefault()
     const code = parseInviteInput(invite)
     if (!code) {
-      setInviteError('รหัสหรือลิงก์เชิญไม่ถูกต้อง')
+      setInviteError(t('home.invalidInvite'))
       return
     }
     navigate(`/t/${code}`)
   }
 
   return (
-    <Page>
-      <header className="pt-10 pb-6">
-        <h1 className="text-3xl font-bold text-teal-800">Travel Split</h1>
-        <p className="mt-1 text-slate-600">หารค่าใช้จ่ายทริปกับเพื่อน ไม่ต้องจดเอง</p>
-      </header>
-
-      <div className="space-y-4">
+    <AppFrame nav={mainNav}>
+      <BlueHeader className="pb-20">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold tracking-tight">Travel Split</h1>
+          <HealthBadge compact />
+        </div>
+        <form onSubmit={onJoin} className="mt-3">
+          <label className="flex items-center gap-2 rounded-xl bg-white px-3 py-2.5 text-slate-900 shadow-sm">
+            <Search className="size-5 shrink-0 text-slate-400" />
+            <input
+              ref={inviteRef}
+              value={invite}
+              onChange={(e) => {
+                setInvite(e.target.value)
+                setInviteError('')
+              }}
+              placeholder={t('home.searchPlaceholder')}
+              aria-label={t('home.searchLabel')}
+              autoCapitalize="characters"
+              className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-slate-400"
+            />
+            {invite && (
+              <button type="submit" className="rounded-lg bg-brand-600 px-3 py-1 text-sm font-medium text-white">
+                {t('home.join')}
+              </button>
+            )}
+          </label>
+          {inviteError && <p className="mt-2 text-sm text-amber-200">{inviteError}</p>}
+        </form>
         {recent.length > 0 && (
-          <Card className="px-2">
-            <h2 className="mb-1 px-2 text-lg font-bold">ทริปของฉัน</h2>
-            <ul className="divide-y divide-slate-100">
-              {recent.map((t) => (
-                <li key={t.id} className="flex items-center">
-                  <Link to={`/t/${t.code}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-3 hover:bg-slate-50">
-                    <Avatar name={t.name} />
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">{t.name}</span>
-                      <span className="block truncate text-xs text-slate-500">
-                        {t.myName ? `คุณคือ ${t.myName} · ` : ''}
-                        {t.code}
-                      </span>
-                    </span>
-                  </Link>
-                  <button
-                    onClick={() => {
-                      if (!confirm(`ซ่อน "${t.name}" จากรายการนี้? (ข้อมูลทริปไม่ถูกลบ เข้าใหม่ได้ด้วยลิงก์เชิญ)`)) return
-                      forgetTrip(t.id)
-                      setRecent(getRecentTrips())
-                    }}
-                    className="rounded-lg px-3 py-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                    aria-label={`ซ่อน ${t.name}`}
-                  >
-                    ✕
-                  </button>
-                </li>
+          <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4">
+            {recent.slice(0, 6).map((tr) => (
+              <Link key={tr.id} to={`/t/${tr.code}`} className="shrink-0 rounded-lg bg-white/15 px-3 py-1 text-sm backdrop-blur hover:bg-white/25">
+                {tr.name}
+              </Link>
+            ))}
+          </div>
+        )}
+      </BlueHeader>
+
+      <main className="mx-auto -mt-14 max-w-md space-y-4 px-4">
+        <Sheet>
+          <div className="grid grid-cols-4 gap-2">
+            <IconAction icon={Plus} label={t('home.newTrip')} to="/new" />
+            <IconAction icon={Luggage} label={t('home.myTrips')} to="/trips" />
+            <IconAction icon={Ticket} label={t('home.enterCode')} onClick={() => inviteRef.current?.focus()} />
+            <IconAction icon={CircleHelp} label={t('home.howTo')} onClick={() => setShowHelp((v) => !v)} />
+          </div>
+          {showHelp && (
+            <ol className="mt-4 list-decimal space-y-1 rounded-2xl bg-brand-50 p-4 pl-8 text-sm text-slate-700">
+              <li>{t('home.help1')}</li>
+              <li>{t('home.help2')}</li>
+              <li>{t('home.help3')}</li>
+            </ol>
+          )}
+        </Sheet>
+
+        {recent.length > 0 && (
+          <section>
+            <div className="mb-2 flex items-center justify-between px-1">
+              <h2 className="text-lg font-bold">{t('home.recent')}</h2>
+              <Link to="/trips" className="flex items-center text-sm text-brand-600">
+                {t('home.seeAll')} <ChevronRight className="size-4" />
+              </Link>
+            </div>
+            <div className="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1">
+              {recent.slice(0, 8).map((tr) => (
+                <Link key={tr.id} to={`/t/${tr.code}`} className="w-40 shrink-0 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
+                  <TripCover name={tr.name} className="h-24" />
+                  <div className="p-3">
+                    <p className="truncate font-semibold">{tr.name}</p>
+                    <p className="truncate text-xs text-slate-500">{tr.myName ? t('home.youAre', { name: tr.myName }) : tr.code}</p>
+                  </div>
+                </Link>
               ))}
-            </ul>
-          </Card>
+            </div>
+          </section>
         )}
 
-        <Card>
-          <h2 className="mb-3 text-lg font-bold">สร้างทริปใหม่</h2>
-          <form onSubmit={onCreate} className="space-y-3">
-            <Field label="ชื่อทริป">
-              <TextInput value={tripName} onChange={(e) => setTripName(e.target.value)} placeholder="เช่น โตเกียว พ.ย. 69" required maxLength={100} />
-            </Field>
-            <Field label="ชื่อของคุณ">
-              <TextInput value={myName} onChange={(e) => setMyName(e.target.value)} placeholder="ชื่อเล่น" required maxLength={50} />
-            </Field>
-            <Field label="สกุลเงินหลัก" hint="ใช้สรุปยอดว่าใครต้องโอนให้ใคร">
-              <select value={currency} onChange={(e) => setCurrency(e.target.value)} className={inputClass}>
-                {CURRENCIES.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
-            </Field>
-            <ErrorText error={create.error} />
-            <Button type="submit" className="w-full" disabled={create.isPending}>
-              {create.isPending ? 'กำลังสร้าง…' : 'สร้างทริป'}
-            </Button>
-          </form>
-        </Card>
-
-        <Card>
-          <h2 className="mb-3 text-lg font-bold">เข้าทริปของเพื่อน</h2>
-          <form onSubmit={onJoin} className="space-y-3">
-            <Field label="ลิงก์หรือรหัสเชิญ">
-              <TextInput
-                value={invite}
-                onChange={(e) => {
-                  setInvite(e.target.value)
-                  setInviteError('')
-                }}
-                placeholder="วางลิงก์ หรือพิมพ์รหัส 10 ตัว"
-                autoCapitalize="characters"
-                required
-              />
-            </Field>
-            {inviteError && <ErrorText error={inviteError} />}
-            <Button type="submit" variant="secondary" className="w-full">
-              เข้าทริป
-            </Button>
-          </form>
-        </Card>
-
-        <div className="text-center">
-          <HealthBadge />
-        </div>
-      </div>
-    </Page>
+        <Link
+          to="/new"
+          className="relative block overflow-hidden rounded-3xl bg-gradient-to-br from-brand-500 to-indigo-700 p-5 text-white shadow-md"
+        >
+          <p className="text-sm text-brand-100">{t('home.promoKicker')}</p>
+          <p className="mt-1 text-2xl leading-tight font-bold">
+            {t('home.promoTitle1')}
+            <br />
+            {t('home.promoTitle2')}
+          </p>
+          <span className="mt-4 inline-flex items-center gap-1 rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-brand-700">
+            {t('home.promoCta')} <ChevronRight className="size-4" />
+          </span>
+          <span aria-hidden className="absolute -right-4 -bottom-6 text-[7rem] opacity-20">
+            ✈
+          </span>
+        </Link>
+      </main>
+    </AppFrame>
   )
 }

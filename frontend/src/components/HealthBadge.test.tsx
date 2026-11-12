@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { I18nProvider } from '../i18n/I18nProvider'
 import { render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { HealthBadge } from './HealthBadge'
@@ -8,9 +9,11 @@ afterEach(() => vi.restoreAllMocks())
 function renderBadge() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={qc}>
+    <I18nProvider initialLang="th">
+      <QueryClientProvider client={qc}>
       <HealthBadge />
-    </QueryClientProvider>,
+    </QueryClientProvider>
+    </I18nProvider>,
   )
 }
 

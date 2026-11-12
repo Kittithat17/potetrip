@@ -17,6 +17,7 @@ type Config struct {
 	GeminiModel     string
 	SlipConcurrency int
 	CORSOrigins     []string
+	FXBaseURL       string
 }
 
 func Load() (Config, error) {
@@ -26,6 +27,7 @@ func Load() (Config, error) {
 		SlipProvider: getenv("SLIP_PROVIDER", "gemini"),
 		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
 		GeminiModel:  os.Getenv("GEMINI_MODEL"),
+		FXBaseURL:    getenv("FX_BASE_URL", "https://api.frankfurter.dev/v1"),
 	}
 	if cfg.DatabaseURL == "" {
 		return cfg, errors.New("DATABASE_URL is required")

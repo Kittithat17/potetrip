@@ -11,10 +11,23 @@ import (
 	"github.com/google/uuid"
 )
 
+const countTripActivity = `-- name: CountTripActivity :one
+SELECT
+    (SELECT count(*) FROM expenses e WHERE e.trip_id = $1)
+  + (SELECT count(*) FROM settlements_paid s WHERE s.trip_id = $1) AS n
+`
+
+func (q *Queries) CountTripActivity(ctx context.Context, tripID uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countTripActivity, tripID)
+	var n int32
+	err := row.Scan(&n)
+	return n, err
+}
+
 const createTrip = `-- name: CreateTrip :one
 INSERT INTO trips (name, base_currency, invite_code)
 VALUES ($1, $2, $3)
-RETURNING id, name, base_currency, invite_code, created_at
+RETURNING id, name, base_currency, invite_code, created_at, owner_member_id
 `
 
 type CreateTripParams struct {
@@ -32,12 +45,13 @@ func (q *Queries) CreateTrip(ctx context.Context, arg CreateTripParams) (Trip, e
 		&i.BaseCurrency,
 		&i.InviteCode,
 		&i.CreatedAt,
+		&i.OwnerMemberID,
 	)
 	return i, err
 }
 
 const getTrip = `-- name: GetTrip :one
-SELECT id, name, base_currency, invite_code, created_at FROM trips WHERE id = $1
+SELECT id, name, base_currency, invite_code, created_at, owner_member_id FROM trips WHERE id = $1
 `
 
 func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
@@ -49,12 +63,13 @@ func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
 		&i.BaseCurrency,
 		&i.InviteCode,
 		&i.CreatedAt,
+		&i.OwnerMemberID,
 	)
 	return i, err
 }
 
 const getTripByInviteCode = `-- name: GetTripByInviteCode :one
-SELECT id, name, base_currency, invite_code, created_at FROM trips WHERE invite_code = $1
+SELECT id, name, base_currency, invite_code, created_at, owner_member_id FROM trips WHERE invite_code = $1
 `
 
 func (q *Queries) GetTripByInviteCode(ctx context.Context, inviteCode string) (Trip, error) {
@@ -66,6 +81,63 @@ func (q *Queries) GetTripByInviteCode(ctx context.Context, inviteCode string) (T
 		&i.BaseCurrency,
 		&i.InviteCode,
 		&i.CreatedAt,
+		&i.OwnerMemberID,
+	)
+	return i, err
+}
+
+const lockTrip = `-- name: LockTrip :one
+SELECT id, name, base_currency, invite_code, created_at, owner_member_id FROM trips WHERE id = $1 FOR UPDATE
+`
+
+// Serialises currency changes against new expenses.
+func (q *Queries) LockTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
+	row := q.db.QueryRow(ctx, lockTrip, id)
+	var i Trip
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.BaseCurrency,
+		&i.InviteCode,
+		&i.CreatedAt,
+		&i.OwnerMemberID,
+	)
+	return i, err
+}
+
+const tripCurrencyForShare = `-- name: TripCurrencyForShare :one
+SELECT base_currency FROM trips WHERE id = $1 FOR SHARE
+`
+
+func (q *Queries) TripCurrencyForShare(ctx context.Context, id uuid.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, tripCurrencyForShare, id)
+	var base_currency string
+	err := row.Scan(&base_currency)
+	return base_currency, err
+}
+
+const updateTrip = `-- name: UpdateTrip :one
+UPDATE trips SET name = $2, base_currency = $3
+WHERE id = $1
+RETURNING id, name, base_currency, invite_code, created_at, owner_member_id
+`
+
+type UpdateTripParams struct {
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	BaseCurrency string    `json:"base_currency"`
+}
+
+func (q *Queries) UpdateTrip(ctx context.Context, arg UpdateTripParams) (Trip, error) {
+	row := q.db.QueryRow(ctx, updateTrip, arg.ID, arg.Name, arg.BaseCurrency)
+	var i Trip
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.BaseCurrency,
+		&i.InviteCode,
+		&i.CreatedAt,
+		&i.OwnerMemberID,
 	)
 	return i, err
 }

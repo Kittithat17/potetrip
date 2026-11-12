@@ -17,7 +17,7 @@ import (
 type apiClient struct {
 	t  *testing.T
 	h  http.Handler
-	me string
+	me string // device token sent as X-Device-Token
 }
 
 func newAPI(t *testing.T) *apiClient {
@@ -42,7 +42,7 @@ func (c *apiClient) do(method, path string, body any, wantStatus int, out any) {
 	}
 	req := httptest.NewRequest(method, "/api/v1"+path, &buf)
 	if c.me != "" {
-		req.Header.Set("X-Member-Id", c.me)
+		req.Header.Set(TokenHeader, c.me)
 	}
 	rec := httptest.NewRecorder()
 	c.h.ServeHTTP(rec, req)
@@ -64,9 +64,10 @@ func (c *apiClient) errCode(method, path string, body any, wantStatus int) strin
 }
 
 type tripResp struct {
-	ID           string `json:"id"`
-	InviteCode   string `json:"invite_code"`
-	BaseCurrency string `json:"base_currency"`
+	ID            string  `json:"id"`
+	InviteCode    string  `json:"invite_code"`
+	BaseCurrency  string  `json:"base_currency"`
+	OwnerMemberID *string `json:"owner_member_id"`
 }
 
 type memberResp struct {
@@ -74,64 +75,161 @@ type memberResp struct {
 	Name string `json:"name"`
 }
 
-func TestTripAndMembers(t *testing.T) {
+// newTrip creates a trip; the returned token belongs to the owner.
+func (c *apiClient) newTrip(name, creator string) (tripResp, memberResp, string) {
+	c.t.Helper()
+	var out struct {
+		Trip   tripResp   `json:"trip"`
+		Member memberResp `json:"member"`
+		Token  string     `json:"token"`
+	}
+	c.do("POST", "/trips", map[string]any{"name": name, "creator_name": creator}, 201, &out)
+	return out.Trip, out.Member, out.Token
+}
+
+// join files a join request and returns the new device's token and request id.
+func (c *apiClient) join(tripID string, body map[string]any) (string, string) {
+	c.t.Helper()
+	var out struct {
+		Token   string `json:"token"`
+		Request struct {
+			ID string `json:"id"`
+		} `json:"request"`
+	}
+	saved := c.me
+	c.me = ""
+	c.do("POST", "/trips/"+tripID+"/join", body, 201, &out)
+	c.me = saved
+	return out.Token, out.Request.ID
+}
+
+// addMember joins and gets approved by ownerToken; returns the member and its token.
+func (c *apiClient) addMember(tripID, ownerToken, name string) (memberResp, string) {
+	c.t.Helper()
+	token, reqID := c.join(tripID, map[string]any{"name": name})
+	saved := c.me
+	c.me = ownerToken
+	var m memberResp
+	c.do("POST", "/trips/"+tripID+"/join-requests/"+reqID+"/approve", nil, 200, &m)
+	c.me = saved
+	return m, token
+}
+
+func TestCreateTripAndInvite(t *testing.T) {
 	c := newAPI(t)
 
-	var tr tripResp
-	c.do("POST", "/trips", map[string]any{"name": "ญี่ปุ่น 2026"}, 201, &tr)
-	if tr.BaseCurrency != "THB" || len(tr.InviteCode) != 10 {
-		t.Fatalf("trip %+v", tr)
+	tr, owner, token := c.newTrip("ญี่ปุ่น 2026", "แบงก์")
+	if tr.BaseCurrency != "THB" || len(tr.InviteCode) != 10 || tr.OwnerMemberID == nil || *tr.OwnerMemberID != owner.ID || len(token) < 40 {
+		t.Fatalf("trip %+v owner %+v token %q", tr, owner, token)
 	}
 
-	var got tripResp
+	var got struct {
+		Trip    tripResp `json:"trip"`
+		Members []map[string]any
+	}
 	c.do("GET", "/trips/"+strings.ToLower(tr.InviteCode), nil, 200, &got)
-	if got.ID != tr.ID {
-		t.Fatal("invite lookup returned a different trip")
+	if got.Trip.ID != tr.ID || len(got.Members) != 1 || got.Members[0]["name"] != "แบงก์" {
+		t.Fatalf("invite lookup %+v", got)
+	}
+	if _, leaked := got.Members[0]["promptpay"]; leaked {
+		t.Fatal("public member list must not expose promptpay")
 	}
 	if code := c.errCode("GET", "/trips/NOPE", nil, 404); code != "trip_not_found" {
 		t.Fatal(code)
 	}
-	if code := c.errCode("POST", "/trips", map[string]any{"name": " "}, 400); code != "invalid_name" {
-		t.Fatal(code)
+	for _, body := range []map[string]any{{"name": " ", "creator_name": "a"}, {"name": "x", "creator_name": ""}} {
+		if code := c.errCode("POST", "/trips", body, 400); code != "invalid_name" {
+			t.Fatal(code)
+		}
 	}
-	if code := c.errCode("POST", "/trips", map[string]any{"name": "x", "base_currency": "ZZZ"}, 400); code != "unsupported_currency" {
-		t.Fatal(code)
-	}
-
-	var m memberResp
-	c.do("POST", "/trips/"+tr.ID+"/members", map[string]any{"name": "แบงก์", "promptpay": "081-234-5678"}, 201, &m)
-	if code := c.errCode("POST", "/trips/"+tr.ID+"/members", map[string]any{"name": " แบงก์ "}, 409); code != "member_name_taken" {
-		t.Fatal(code)
-	}
-	var ms []memberResp
-	c.do("GET", "/trips/"+tr.ID+"/members", nil, 200, &ms)
-	if len(ms) != 1 || ms[0].ID != m.ID {
-		t.Fatalf("members %+v", ms)
-	}
-	if code := c.errCode("GET", "/trips/00000000-0000-0000-0000-000000000000/members", nil, 404); code != "trip_not_found" {
+	if code := c.errCode("POST", "/trips", map[string]any{"name": "x", "creator_name": "a", "base_currency": "ZZZ"}, 400); code != "unsupported_currency" {
 		t.Fatal(code)
 	}
 }
 
-func TestMemberHeaderIsChecked(t *testing.T) {
+func TestJoinNeedsOwnerApproval(t *testing.T) {
 	c := newAPI(t)
-	var t1, t2 tripResp
-	c.do("POST", "/trips", map[string]any{"name": "A"}, 201, &t1)
-	c.do("POST", "/trips", map[string]any{"name": "B"}, 201, &t2)
-	var outsider memberResp
-	c.do("POST", "/trips/"+t2.ID+"/members", map[string]any{"name": "คนนอก"}, 201, &outsider)
+	tr, owner, ownerToken := c.newTrip("เชียงใหม่", "แบงก์")
+	base := "/trips/" + tr.ID
+
+	// A stranger with the invite code can only ask.
+	strangerToken, reqID := c.join(tr.ID, map[string]any{"name": "ฝน", "promptpay": "081-234-5678"})
+	c.me = strangerToken
+	var me map[string]any
+	c.do("GET", base+"/me", nil, 200, &me)
+	if me["status"] != "pending" || me["member"] != nil {
+		t.Fatalf("pending me %+v", me)
+	}
+	for _, path := range []string{"/members", "/expenses", "/balances", "/settlement"} {
+		if code := c.errCode("GET", base+path, nil, 403); code != "pending_approval" {
+			t.Fatalf("%s: %s", path, code)
+		}
+	}
+	if code := c.errCode("GET", base+"/join-requests", nil, 403); code != "pending_approval" {
+		t.Fatal(code)
+	}
+
+	// Claiming an existing member also needs approval; names must be unique.
+	if code := func() string {
+		c.me = ""
+		return c.errCode("POST", base+"/join", map[string]any{"name": " แบงก์ "}, 409)
+	}(); code != "member_name_taken" {
+		t.Fatal(code)
+	}
+	impostorToken, impostorReq := c.join(tr.ID, map[string]any{"member_id": owner.ID})
+
+	// Only the owner sees and decides requests.
+	c.me = ownerToken
+	var reqs []map[string]any
+	c.do("GET", base+"/join-requests", nil, 200, &reqs)
+	if len(reqs) != 2 || reqs[1]["requested_member_id"] != owner.ID {
+		t.Fatalf("requests %+v", reqs)
+	}
+	var fon memberResp
+	c.do("POST", base+"/join-requests/"+reqID+"/approve", nil, 200, &fon)
+	if fon.Name != "ฝน" {
+		t.Fatalf("approved %+v", fon)
+	}
+	c.do("POST", base+"/join-requests/"+impostorReq+"/reject", nil, 204, nil)
+	if code := c.errCode("POST", base+"/join-requests/"+reqID+"/approve", nil, 404); code != "request_not_found" {
+		t.Fatal(code)
+	}
+
+	// Approved stranger is now a member but not the owner.
+	c.me = strangerToken
+	c.do("GET", base+"/me", nil, 200, &me)
+	if me["status"] != "approved" || me["is_owner"] != false {
+		t.Fatalf("approved me %+v", me)
+	}
+	var ms []map[string]any
+	c.do("GET", base+"/members", nil, 200, &ms)
+	if len(ms) != 2 || ms[1]["promptpay"] != "0812345678" {
+		t.Fatalf("members %+v", ms)
+	}
+	if code := c.errCode("GET", base+"/join-requests", nil, 403); code != "owner_only" {
+		t.Fatal(code)
+	}
+
+	c.me = impostorToken
+	if code := c.errCode("GET", base+"/expenses", nil, 403); code != "join_rejected" {
+		t.Fatal(code)
+	}
+}
+
+func TestTokenIsCheckedPerTrip(t *testing.T) {
+	c := newAPI(t)
+	t1, _, _ := c.newTrip("A", "a")
+	_, _, otherToken := c.newTrip("B", "b")
 
 	path := "/trips/" + t1.ID + "/expenses"
-	if code := c.errCode("GET", path, nil, 401); code != "member_required" {
+	if code := c.errCode("GET", path, nil, 401); code != "token_required" {
 		t.Fatal(code)
 	}
-	c.me = "not-a-uuid"
-	if code := c.errCode("GET", path, nil, 403); code != "not_a_member" {
-		t.Fatal(code)
-	}
-	c.me = outsider.ID
-	if code := c.errCode("GET", path, nil, 403); code != "not_a_member" {
-		t.Fatal(code)
+	for _, tok := range []string{"garbage", otherToken} {
+		c.me = tok
+		if code := c.errCode("GET", path, nil, 403); code != "not_a_member" {
+			t.Fatalf("%q: %s", tok, code)
+		}
 	}
 }
 
@@ -146,16 +244,15 @@ type expenseResp struct {
 
 func TestExpensesBalancesAndSettlement(t *testing.T) {
 	c := newAPI(t)
-	var tr tripResp
-	c.do("POST", "/trips", map[string]any{"name": "เชียงใหม่"}, 201, &tr)
+	tr, a, ownerToken := c.newTrip("เชียงใหม่", "A")
 	base := "/trips/" + tr.ID
-	ids := map[string]string{}
-	for _, n := range []string{"A", "B", "C"} {
-		var m memberResp
-		c.do("POST", base+"/members", map[string]any{"name": n}, 201, &m)
-		ids[n] = m.ID
+	ids := map[string]string{"A": a.ID}
+	tokens := map[string]string{"A": ownerToken}
+	for _, n := range []string{"B", "C"} {
+		m, tok := c.addMember(tr.ID, ownerToken, n)
+		ids[n], tokens[n] = m.ID, tok
 	}
-	c.me = ids["B"]
+	c.me = tokens["B"]
 
 	// A paid 100.00 split equally -> 33.34 / 33.33 / 33.33 (remainder to A, first in trip order).
 	var dinner expenseResp
@@ -282,5 +379,45 @@ func TestExpensesBalancesAndSettlement(t *testing.T) {
 	c.do("GET", base+"/expenses/"+taxi.ID, nil, 200, &one)
 	if len(one.Shares) != 3 {
 		t.Fatalf("get one %+v", one)
+	}
+}
+
+func TestOwnerEditsTripCurrencyUntilFirstExpense(t *testing.T) {
+	c := newAPI(t)
+	tr, owner, ownerToken := c.newTrip("โตเกียว", "แบงก์")
+	base := "/trips/" + tr.ID
+	_, friendToken := c.addMember(tr.ID, ownerToken, "ฝน")
+
+	c.me = friendToken
+	if code := c.errCode("PATCH", base, map[string]any{"name": "x"}, 403); code != "owner_only" {
+		t.Fatal(code)
+	}
+
+	c.me = ownerToken
+	var got tripResp
+	c.do("PATCH", base, map[string]any{"name": "  ญี่ปุ่น  ", "base_currency": "jpy"}, 200, &got)
+	if got.BaseCurrency != "JPY" {
+		t.Fatalf("%+v", got)
+	}
+	if code := c.errCode("PATCH", base, map[string]any{"base_currency": "ZZZ"}, 400); code != "unsupported_currency" {
+		t.Fatal(code)
+	}
+
+	// After the first expense the currency is locked, but renaming still works.
+	c.do("POST", base+"/expenses", map[string]any{"title": "ราเมง", "category": "food", "paid_by": owner.ID,
+		"amount": 3000, "currency": "JPY", "split_type": "equal", "member_ids": []string{owner.ID}}, 201, nil)
+	if code := c.errCode("PATCH", base, map[string]any{"base_currency": "THB"}, 409); code != "currency_locked" {
+		t.Fatal(code)
+	}
+	c.do("PATCH", base, map[string]any{"name": "ญี่ปุ่น 2026", "base_currency": "JPY"}, 200, &got)
+	var inv struct {
+		Trip struct {
+			Name         string `json:"name"`
+			BaseCurrency string `json:"base_currency"`
+		} `json:"trip"`
+	}
+	c.do("GET", "/trips/"+tr.InviteCode, nil, 200, &inv)
+	if inv.Trip.Name != "ญี่ปุ่น 2026" || inv.Trip.BaseCurrency != "JPY" {
+		t.Fatalf("%+v", inv)
 	}
 }

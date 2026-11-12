@@ -11,6 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Device struct {
+	ID                uuid.UUID  `json:"id"`
+	TripID            uuid.UUID  `json:"trip_id"`
+	TokenHash         []byte     `json:"token_hash"`
+	Status            string     `json:"status"`
+	MemberID          *uuid.UUID `json:"member_id"`
+	RequestedName     string     `json:"requested_name"`
+	RequestedMemberID *uuid.UUID `json:"requested_member_id"`
+	Promptpay         *string    `json:"promptpay"`
+	CreatedAt         time.Time  `json:"created_at"`
+	DecidedAt         *time.Time `json:"decided_at"`
+}
+
 type Expense struct {
 	ID         uuid.UUID      `json:"id"`
 	TripID     uuid.UUID      `json:"trip_id"`
@@ -42,6 +55,15 @@ type ExpenseShare struct {
 	AmountBase int64     `json:"amount_base"`
 }
 
+type FxRate struct {
+	Base          string         `json:"base"`
+	Quote         string         `json:"quote"`
+	RequestedDate time.Time      `json:"requested_date"`
+	RateDate      time.Time      `json:"rate_date"`
+	Rate          pgtype.Numeric `json:"rate"`
+	FetchedAt     time.Time      `json:"fetched_at"`
+}
+
 type Member struct {
 	ID        uuid.UUID `json:"id"`
 	TripID    uuid.UUID `json:"trip_id"`
@@ -70,9 +92,10 @@ type Slip struct {
 }
 
 type Trip struct {
-	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	BaseCurrency string    `json:"base_currency"`
-	InviteCode   string    `json:"invite_code"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID            uuid.UUID  `json:"id"`
+	Name          string     `json:"name"`
+	BaseCurrency  string     `json:"base_currency"`
+	InviteCode    string     `json:"invite_code"`
+	CreatedAt     time.Time  `json:"created_at"`
+	OwnerMemberID *uuid.UUID `json:"owner_member_id"`
 }

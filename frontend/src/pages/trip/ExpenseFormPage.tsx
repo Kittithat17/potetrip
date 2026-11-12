@@ -7,11 +7,15 @@ import { CATEGORIES } from '../../lib/categories'
 import { fromLocalInput, toLocalInput } from '../../lib/datetime'
 import { formatAmount, formatMoney, parseAmount, splitEqual } from '../../lib/money'
 import { useTrip } from './context'
+import { useI18n } from '../../i18n/context'
+import { useConfirm } from '../../lib/confirm'
+import { Approx } from '../../components/Approx'
 
 export function ExpenseFormPage() {
+  const { t } = useI18n()
   const { id } = useParams()
-  const { trip, me, base } = useTrip()
-  const q = useExpense(trip.id, me.id, id)
+  const { trip, token, base } = useTrip()
+  const q = useExpense(trip.id, token, id)
 
   if (id && q.isPending) {
     return (
@@ -23,7 +27,7 @@ export function ExpenseFormPage() {
   if (id && q.error) {
     return (
       <Page>
-        <PageHeader title="แก้ไขรายจ่าย" back={base} />
+        <PageHeader title={t('expense.edit')} back={base} />
         <ErrorText error={q.error} />
       </Page>
     )
@@ -48,11 +52,13 @@ type FormProps = {
 }
 
 export function ExpenseForm({ existing, draft, slipId, heading, top, extraActions, onSaved }: FormProps) {
-  const { trip, me, members, base } = useTrip()
+  const { t } = useI18n()
+  const confirm = useConfirm()
+  const { trip, me, token, members, base } = useTrip()
   const navigate = useNavigate()
   const cur = trip.base_currency
-  const save = useSaveExpense(trip.id, me.id, existing?.id)
-  const del = useDeleteExpense(trip.id, me.id)
+  const save = useSaveExpense(trip.id, token, existing?.id)
+  const del = useDeleteExpense(trip.id, token)
 
   const [title, setTitle] = useState(existing?.title ?? draft?.title ?? '')
   const [amountText, setAmountText] = useState(
@@ -94,7 +100,7 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
     setFormError('')
-    if (!amount) return setFormError('กรอกจำนวนเงินให้ถูกต้อง')
+    if (!amount) return setFormError(t('expense.errAmount'))
 
     const body: ExpenseInput = {
       title,
@@ -107,31 +113,37 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
       slip_id: existing ? undefined : slipId,
     }
     if (mode === 'equal') {
-      if (selected.size === 0) return setFormError('เลือกคนหารอย่างน้อย 1 คน')
+      if (selected.size === 0) return setFormError(t('expense.errNoOne'))
       body.member_ids = selectedOrdered.map((m) => m.id)
     } else {
-      if (exactParsed.some((x) => x.v === null)) return setFormError('ยอดของบางคนไม่ถูกต้อง')
-      if (exactRemaining !== 0) return setFormError('ผลรวมของแต่ละคนต้องเท่ากับยอดทั้งหมด')
+      if (exactParsed.some((x) => x.v === null)) return setFormError(t('expense.errBadShare'))
+      if (exactRemaining !== 0) return setFormError(t('expense.errSum'))
       body.shares = exactParsed.filter((x) => (x.v ?? 0) > 0).map((x) => ({ member_id: x.id, amount: x.v! }))
     }
     save.mutate(body, { onSuccess: () => (onSaved ? onSaved() : navigate(base)) })
   }
 
-  const onDelete = () => {
-    if (!existing || !confirm(`ลบ "${existing.title}" ใช่ไหม?`)) return
+  const onDelete = async () => {
+    if (!existing) return
+    const ok = await confirm({
+      title: t('expense.deleteConfirm', { title: existing.title }),
+      message: t('expense.deleteHint'),
+      confirmLabel: t('expense.deleteAction'),
+    })
+    if (!ok) return
     del.mutate(existing.id, { onSuccess: () => navigate(base) })
   }
 
   return (
     <Page>
-      <PageHeader title={heading ?? (existing ? 'แก้ไขรายจ่าย' : 'เพิ่มรายจ่าย')} back={base} />
+      <PageHeader title={heading ?? (existing ? t('expense.edit') : t('expense.add'))} back={base} />
       {top}
       <form onSubmit={onSubmit} className="space-y-4">
-        <Field label="รายการ">
-          <TextInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น ราเมงมื้อเย็น" required maxLength={200} />
+        <Field label={t('expense.title')}>
+          <TextInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('expense.titlePlaceholder')} required maxLength={200} />
         </Field>
 
-        <Field label="จำนวนเงิน" hint="หลายสกุลเงินจะมาในเวอร์ชันถัดไป">
+        <Field label={t('expense.amount')} hint={amount ? <Approx minor={amount} currency={cur} className="text-xs text-slate-500" /> : undefined}>
           <div className="flex gap-2">
             <TextInput
               value={amountText}
@@ -145,19 +157,19 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
           </div>
         </Field>
 
-        <Field label="ใครจ่าย">
+        <Field label={t('expense.paidBy')}>
           <select value={paidBy} onChange={(e) => setPaidBy(e.target.value)} className={inputClass}>
             {members.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
-                {m.id === me.id ? ' (ฉัน)' : ''}
+                {m.id === me.id ? t('common.meSuffix') : ''}
               </option>
             ))}
           </select>
         </Field>
 
         <fieldset>
-          <legend className="mb-1 text-sm font-medium text-slate-700">หมวดหมู่</legend>
+          <legend className="mb-1 text-sm font-medium text-slate-700">{t('expense.category')}</legend>
           <div className="grid grid-cols-3 gap-2">
             {CATEGORIES.map((c) => (
               <button
@@ -166,27 +178,27 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
                 onClick={() => setCategory(c.value)}
                 aria-pressed={category === c.value}
                 className={`rounded-xl px-2 py-2 text-sm ring-1 ${
-                  category === c.value ? 'bg-teal-700 text-white ring-teal-700' : 'bg-white ring-slate-300'
+                  category === c.value ? 'bg-brand-700 text-white ring-brand-700' : 'bg-white ring-slate-300'
                 }`}
               >
-                <span className="block text-lg">{c.icon}</span>
-                {c.label}
+                <c.icon className="mx-auto mb-0.5 size-5" />
+                {t(c.labelKey)}
               </button>
             ))}
           </div>
         </fieldset>
 
-        <Field label="วันเวลาที่จ่าย">
+        <Field label={t('expense.when')}>
           <TextInput type="datetime-local" value={spentAt} onChange={(e) => setSpentAt(e.target.value)} required />
         </Field>
 
         <fieldset className="space-y-3">
-          <legend className="mb-1 text-sm font-medium text-slate-700">วิธีหาร</legend>
+          <legend className="mb-1 text-sm font-medium text-slate-700">{t('expense.split')}</legend>
           <div className="grid grid-cols-3 rounded-xl bg-slate-200 p-1 text-sm">
             {(
               [
-                ['equal', 'เท่ากัน'],
-                ['exact', 'ระบุยอด'],
+                ['equal', t('expense.equal')],
+                ['exact', t('expense.exact')],
               ] as const
             ).map(([v, label]) => (
               <button
@@ -199,8 +211,8 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
                 {label}
               </button>
             ))}
-            <button type="button" disabled className="rounded-lg py-2 text-slate-400" title="จะมาในเวอร์ชันถัดไป">
-              รายเมนู
+            <button type="button" disabled className="rounded-lg py-2 text-slate-400" title={t('expense.comingSoon')}>
+              {t('expense.items')}
             </button>
           </div>
 
@@ -211,7 +223,7 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
                 return (
                   <li key={m.id}>
                     <label className="flex items-center gap-3 px-3 py-2">
-                      <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} className="size-5 accent-teal-700" />
+                      <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} className="size-5 accent-brand-700" />
                       <Avatar name={m.name} size="sm" />
                       <span className="flex-1">{m.name}</span>
                       <span className="text-sm text-slate-500 tabular-nums">{idx >= 0 && amount ? formatMoney(equalParts[idx], cur) : ''}</span>
@@ -232,7 +244,7 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
                       onChange={(e) => setExact((p) => ({ ...p, [m.id]: e.target.value }))}
                       inputMode="decimal"
                       placeholder="0.00"
-                      aria-label={`ยอดของ ${m.name}`}
+                      aria-label={t('expense.amountFor', { name: m.name })}
                       className={`${inputBase} w-28 shrink-0 text-right tabular-nums`}
                     />
                   </li>
@@ -240,10 +252,10 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
               </ul>
               <p className={`text-right text-sm tabular-nums ${exactRemaining === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
                 {exactRemaining === 0
-                  ? 'ครบพอดี ✓'
+                  ? t('expense.adds')
                   : exactRemaining > 0
-                    ? `เหลืออีก ${formatMoney(exactRemaining, cur)}`
-                    : `เกินมา ${formatMoney(-exactRemaining, cur)}`}
+                    ? t('expense.remaining', { amount: formatMoney(exactRemaining, cur) })
+                    : t('expense.over', { amount: formatMoney(-exactRemaining, cur) })}
               </p>
             </>
           )}
@@ -253,11 +265,11 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
 
         <div className="space-y-2 pt-2">
           <Button type="submit" className="w-full" disabled={save.isPending}>
-            {save.isPending ? 'กำลังบันทึก…' : 'บันทึก'}
+            {save.isPending ? t('common.saving') : t('common.save')}
           </Button>
           {existing && (
             <Button type="button" variant="danger" className="w-full" onClick={onDelete} disabled={del.isPending}>
-              ลบรายการนี้
+              {t('expense.delete')}
             </Button>
           )}
           {extraActions}

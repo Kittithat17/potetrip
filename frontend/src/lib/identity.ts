@@ -1,24 +1,28 @@
-// Remembers which member "I am" per trip. Storage can be unavailable
-// (private mode, blocked site data), so every access is guarded.
-const key = (tripId: string) => `travel-split:member:${tripId}`
+// This device's secret credential per trip. The token proves the device was
+// approved into the trip; memberId is cached so lists can find "me" without
+// a round trip. Storage can be unavailable, so every access is guarded.
+export type TripIdentity = { token: string; memberId?: string }
 
-export function getMyMemberId(tripId: string): string | null {
+const key = (tripId: string) => `travel-split:device:${tripId}`
+
+export function getIdentity(tripId: string): TripIdentity | null {
   try {
-    return localStorage.getItem(key(tripId))
+    const v = JSON.parse(localStorage.getItem(key(tripId)) ?? 'null')
+    return v && typeof v.token === 'string' ? v : null
   } catch {
     return null
   }
 }
 
-export function setMyMemberId(tripId: string, memberId: string): void {
+export function setIdentity(tripId: string, id: TripIdentity): void {
   try {
-    localStorage.setItem(key(tripId), memberId)
+    localStorage.setItem(key(tripId), JSON.stringify(id))
   } catch {
     /* ignore */
   }
 }
 
-export function clearMyMemberId(tripId: string): void {
+export function clearIdentity(tripId: string): void {
   try {
     localStorage.removeItem(key(tripId))
   } catch {

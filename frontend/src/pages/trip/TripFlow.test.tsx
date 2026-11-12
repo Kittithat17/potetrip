@@ -1,13 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ConfirmProvider } from '../../components/ConfirmProvider'
+import { I18nProvider } from '../../i18n/I18nProvider'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { getMyMemberId } from '../../lib/identity'
+import { getIdentity, setIdentity } from '../../lib/identity'
 import { getRecentTrips } from '../../lib/recentTrips'
 import { DashboardPage } from './DashboardPage'
 import { TripLayout } from './TripLayout'
 
-const trip = { id: 't1', name: 'โตเกียว', base_currency: 'THB', invite_code: 'ABCDEFGH23', created_at: '2026-11-01T00:00:00Z' }
+const trip = { id: 't1', name: 'โตเกียว', base_currency: 'THB', invite_code: 'ABCDEFGH23', owner_member_id: 'm2', created_at: '' }
 const members = [
   { id: 'm1', trip_id: 't1', name: 'แบงก์', promptpay: null, created_at: '' },
   { id: 'm2', trip_id: 't1', name: 'ฝน', promptpay: null, created_at: '' },
@@ -26,18 +28,33 @@ const balances = {
     { member_id: 'm2', paid: 60000, owed: 30000, sent: 0, received: 0, net: 30000 },
   ],
 }
+const request = { id: 'r1', status: 'pending', requested_name: 'แบงก์', requested_member_id: null, created_at: '' }
 
-const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200 })
+const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status })
+
+// Server state the mock serves; tests tweak it.
+let meStatus: 'pending' | 'approved' = 'approved'
+let meMember = members[0]
+let calls: { url: string; init?: RequestInit }[] = []
 
 beforeEach(() => {
   localStorage.clear()
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+  meStatus = 'approved'
+  meMember = members[0]
+  calls = []
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input)
-    if (url.endsWith('/trips/ABCDEFGH23')) return json(trip)
-    if (url.endsWith('/trips/t1/members')) return json(members)
-    if (url.endsWith('/trips/t1/expenses')) return json(expenses)
-    if (url.endsWith('/trips/t1/balances')) return json(balances)
-    return new Response('{}', { status: 404 })
+    calls.push({ url, init })
+    if (url.endsWith('/trips/ABCDEFGH23')) return json({ trip, members: members.map(({ id, name }) => ({ id, name })) })
+    if (url.endsWith('/join')) return json({ token: 'new-token', request }, 201)
+    if (url.endsWith('/me'))
+      return json({ status: meStatus, request, member: meStatus === 'approved' ? meMember : null, is_owner: meMember.id === 'm2' })
+    if (url.endsWith('/members')) return json(members)
+    if (url.endsWith('/expenses')) return json(expenses)
+    if (url.endsWith('/balances')) return json(balances)
+    if (url.endsWith('/join-requests')) return json([request])
+    if (url.endsWith('/approve')) return json(members[0])
+    return json({ error: { code: 'trip_not_found', message: 'ไม่พบทริปนี้' } }, 404)
   })
 })
 afterEach(() => vi.restoreAllMocks())
@@ -45,7 +62,9 @@ afterEach(() => vi.restoreAllMocks())
 function renderAt(path: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <QueryClientProvider client={qc}>
+    <I18nProvider initialLang="th">
+      <ConfirmProvider>
+      <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/t/:code" element={<TripLayout />}>
@@ -53,33 +72,52 @@ function renderAt(path: string) {
           </Route>
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
+      </ConfirmProvider>
+    </I18nProvider>,
   )
 }
 
-it('asks who I am, remembers it, then shows my balance', async () => {
+it('a newcomer can only request to join and sees nothing until approved', async () => {
+  meStatus = 'pending'
   renderAt('/t/abcdefgh23')
 
-  expect(await screen.findByText('คุณคือใครในทริปนี้?')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: /แบงก์/ }))
+  expect(await screen.findByText('ขอเข้าทริปในชื่อ')).toBeInTheDocument()
+  fireEvent.change(screen.getByPlaceholderText('ชื่อเล่น'), { target: { value: 'แบงก์' } })
+  fireEvent.click(screen.getByRole('button', { name: 'ส่งคำขอเข้าทริป' }))
+
+  expect(await screen.findByText('รอเจ้าของทริปอนุมัติ')).toBeInTheDocument()
+  expect(getIdentity('t1')).toEqual({ token: 'new-token' })
+  expect(calls.some((c) => c.url.endsWith('/expenses'))).toBe(false)
+  const meCall = calls.find((c) => c.url.endsWith('/me'))!
+  expect(new Headers(meCall.init?.headers).get('X-Device-Token')).toBe('new-token')
+})
+
+it('an approved device sees the dashboard and is remembered', async () => {
+  setIdentity('t1', { token: 'tok' })
+  renderAt('/t/ABCDEFGH23')
 
   expect(await screen.findByText('สวัสดี แบงก์')).toBeInTheDocument()
-  expect(getMyMemberId('t1')).toBe('m1')
-  expect(getRecentTrips()).toMatchObject([{ id: 't1', code: 'ABCDEFGH23', name: 'โตเกียว', myName: 'แบงก์' }])
   expect(await screen.findByText('คุณต้องจ่ายเพื่อน')).toBeInTheDocument()
-  expect(screen.getByText('฿300.00')).toBeInTheDocument()
   expect(screen.getByText('ราเมง')).toBeInTheDocument()
+  expect(getIdentity('t1')).toEqual({ token: 'tok', memberId: 'm1' })
+  expect(getRecentTrips()).toMatchObject([{ id: 't1', name: 'โตเกียว', myName: 'แบงก์' }])
+  // Non-owners never ask for join requests.
+  expect(calls.some((c) => c.url.endsWith('/join-requests'))).toBe(false)
+})
 
-  // Every request after picking carries the member header.
-  const calls = vi.mocked(fetch).mock.calls.filter(([u]) => String(u).includes('/expenses'))
-  const init = calls[0][1] as RequestInit
-  expect(new Headers(init.headers).get('X-Member-Id')).toBe('m1')
+it('the owner sees pending requests and can approve them', async () => {
+  meMember = members[1]
+  setIdentity('t1', { token: 'owner-token' })
+  renderAt('/t/ABCDEFGH23')
+
+  expect(await screen.findByText('คำขอเข้าทริป (1)')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'อนุมัติ แบงก์' }))
+  await screen.findByText('สวัสดี ฝน')
+  await vi.waitFor(() => expect(calls.some((c) => c.url.endsWith('/join-requests/r1/approve'))).toBe(true))
 })
 
 it('shows not found for an unknown invite code', async () => {
-  vi.mocked(fetch).mockResolvedValue(
-    new Response('{"error":{"code":"trip_not_found","message":"ไม่พบทริปนี้"}}', { status: 404 }),
-  )
   renderAt('/t/ZZZZZZZZZZ')
   expect(await screen.findByText(/ไม่พบทริปนี้/)).toBeInTheDocument()
 })

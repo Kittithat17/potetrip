@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -14,15 +13,23 @@ import (
 	"github.com/raisin/travel-split/backend/internal/trip"
 )
 
+// TokenHeader carries the device's secret token for the trip in the URL.
+const TokenHeader = "X-Device-Token"
+
 type ctxKey int
 
 const (
 	tripKey ctxKey = iota
+	deviceKey
 	memberKey
 )
 
 func tripFrom(ctx context.Context) db.Trip     { return ctx.Value(tripKey).(db.Trip) }
+func deviceFrom(ctx context.Context) db.Device { return ctx.Value(deviceKey).(db.Device) }
 func memberFrom(ctx context.Context) db.Member { return ctx.Value(memberKey).(db.Member) }
+func with(r *http.Request, k ctxKey, v any) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), k, v))
+}
 
 // loadTrip resolves {trip} as a trip UUID and stores the trip in context.
 func (s *Server) loadTrip(next http.Handler) http.Handler {
@@ -37,34 +44,55 @@ func (s *Server) loadTrip(next http.Handler) http.Handler {
 			writeErr(w, r, err)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tripKey, t)))
+		next.ServeHTTP(w, with(r, tripKey, t))
 	})
 }
 
-// requireMember checks that X-Member-Id names a member of the loaded trip.
-func (s *Server) requireMember(next http.Handler) http.Handler {
+// requireDevice accepts any device registered to this trip, approved or not.
+func (s *Server) requireDevice(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw := strings.TrimSpace(r.Header.Get("X-Member-Id"))
-		if raw == "" {
-			writeErr(w, r, apperr.Unauthorized("member_required", "ต้องระบุตัวตนด้วย X-Member-Id"))
+		token := strings.TrimSpace(r.Header.Get(TokenHeader))
+		if token == "" {
+			writeErr(w, r, apperr.Unauthorized("token_required", "ต้องเข้าร่วมทริปก่อน"))
 			return
 		}
-		notMember := apperr.Forbidden("not_a_member", "คุณไม่ได้เป็นสมาชิกของทริปนี้")
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			writeErr(w, r, notMember)
-			return
-		}
-		t := tripFrom(r.Context())
-		m, err := s.Trips.Member(r.Context(), t.ID, id)
-		if errors.Is(err, trip.ErrMemberNotFound) {
-			writeErr(w, r, notMember)
-			return
-		}
+		d, err := s.Trips.Device(r.Context(), tripFrom(r.Context()).ID, token)
 		if err != nil {
 			writeErr(w, r, err)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), memberKey, m)))
+		next.ServeHTTP(w, with(r, deviceKey, d))
+	})
+}
+
+// requireMember lets only approved devices through, as their member.
+func (s *Server) requireMember(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d := deviceFrom(r.Context())
+		switch {
+		case d.Status == trip.StatusPending:
+			writeErr(w, r, apperr.Forbidden("pending_approval", "รอเจ้าของทริปอนุมัติก่อน"))
+			return
+		case d.Status != trip.StatusApproved || d.MemberID == nil:
+			writeErr(w, r, apperr.Forbidden("join_rejected", "คำขอเข้าทริปถูกปฏิเสธ"))
+			return
+		}
+		m, err := s.Trips.Member(r.Context(), d.TripID, *d.MemberID)
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		next.ServeHTTP(w, with(r, memberKey, m))
+	})
+}
+
+func (s *Server) requireOwner(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t := tripFrom(r.Context())
+		if t.OwnerMemberID == nil || *t.OwnerMemberID != memberFrom(r.Context()).ID {
+			writeErr(w, r, apperr.Forbidden("owner_only", "เฉพาะเจ้าของทริปเท่านั้น"))
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }

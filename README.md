@@ -70,6 +70,7 @@ backend/
   internal/expense/   รายจ่าย + การแบ่งเงิน (Allocate/SplitEqual)
   internal/settlement/ คำนวณยอดสุทธิและรายการโอน (มี unit test ตามสเปกหัวข้อ 7)
   internal/money/     ตารางสกุลเงิน จำนวนทศนิยม และ ParseDecimal
+  internal/fx/        อัตราแลกเปลี่ยน: Provider (Frankfurter) + cache ใน DB
   internal/slip/      Reader interface, GeminiReader, MockReader, RetryReader, ประมวลผลขนาน
   internal/apperr/    error ของ domain ที่ map เป็น HTTP status
   internal/testdb/    สร้าง schema ชั่วคราวสำหรับ integration test
@@ -101,22 +102,44 @@ docker-compose.yml    Postgres 17 สำหรับ dev
 
 **การทำงาน:** frontend ย่อรูปให้ด้านยาวไม่เกิน 1600px (และตัดข้อมูล EXIF เช่น GPS ออก) แล้วอัปโหลดทีละรูป ครั้งละไม่เกิน 3 รูปพร้อมกัน เพื่อแสดงสถานะของแต่ละรูป backend ตรวจชนิดไฟล์จากเนื้อไฟล์จริง (JPEG/PNG/WebP/HEIC ไม่เกิน 8MB) แล้วส่งให้ AI อ่านแบบขนาน จำกัดด้วย `SLIP_CONCURRENCY` ถ้าเจอ 429 (เกินโควตา) หรือ 503 (โมเดลไม่ว่าง) จะ retry ด้วยระยะรอ 2s → 4s → 8s รูปไม่ถูกเก็บลงดิสก์หรือ DB เก็บแค่ผลที่อ่านได้ใน `slips.raw_result` ผู้ใช้ต้องกดบันทึกหรือข้ามทีละรายการ ระบบไม่บันทึกเอง และสลิปหนึ่งใบผูกกับรายจ่ายได้รายการเดียว
 
-## API (M2–M3)
+## อัตราแลกเปลี่ยน (แท็บ "แลกเงิน")
 
-Base path `/api/v1` ทุก endpoint ใต้ `/trips/{tripId}` ยกเว้น `members` ต้องส่ง header `X-Member-Id` ของสมาชิกในทริปนั้น (ไม่ส่ง → 401, ไม่ใช่สมาชิก → 403)
+ใช้เรตอ้างอิงของธนาคารกลางยุโรป (ECB) ผ่าน [Frankfurter](https://frankfurter.dev) ซึ่งฟรีและไม่ต้องใช้ key เรตอัปเดตวันทำการละครั้ง ไม่ใช่ realtime ร้านแลกเงินหรือบัตรเครดิตจะต่างไปเล็กน้อย รองรับ 30 สกุล (ดูได้ที่ `GET /fx/currencies`) **ไม่มี** TWD, VND, LAK, KHR, MMK
 
-| Method | Path | หมายเหตุ |
-|---|---|---|
-| POST | `/trips` | `{name, base_currency?}` คืนทริปพร้อม `invite_code` |
-| GET | `/trips/{inviteCode}` | ไม่สนตัวพิมพ์เล็กใหญ่ |
-| GET/POST | `/trips/{tripId}/members` | `{name, promptpay?}` ชื่อซ้ำในทริป → 409 |
-| GET | `/trips/{tripId}/expenses?category=&member=` | `member` = คนจ่ายหรือคนที่หารด้วย |
-| POST/PUT | `/trips/{tripId}/expenses[/{id}]` | ดูตัวอย่างด้านล่าง |
-| GET/DELETE | `/trips/{tripId}/expenses/{id}` | |
-| GET | `/trips/{tripId}/balances` | `net` บวก = ได้คืน, ลบ = ต้องจ่าย |
-| GET | `/trips/{tripId}/settlement` | รายการโอนที่น้อยที่สุด |
-| POST | `/trips/{tripId}/settlements/paid` | `{from, to, amount_base}` |
-| POST | `/trips/{tripId}/slips` | multipart ไฟล์รูปได้สูงสุด 10 รูป คืน `results[]` ที่มี `slip_id`, `result` (ผลดิบ), `suggestion` (ค่าแนะนำสำหรับฟอร์ม) ส่ง `slip_id` ตอนสร้างรายจ่ายเพื่อผูกสลิป |
+backend เก็บเรตไว้ในตาราง `fx_rates`: เรตของวันที่ผ่านมาเกิน 7 วันเก็บถาวร ส่วนเรตล่าสุด refresh ทุกชั่วโมง ถ้า Frankfurter ล่มจะใช้เรตใน cache แทนและตอบ `stale: true`
+
+## การเข้าทริปและการยืนยันตัวตน
+
+ไม่มีระบบ login แต่ละเครื่องได้ **token ลับ** แยกต่อทริป (สุ่ม 256 บิต ฝั่ง DB เก็บแค่ SHA-256) แล้วส่งมาทาง header `X-Device-Token` (ต่างจาก spec เดิมที่ใช้ `X-Member-Id` เพราะ member id ไม่ใช่ความลับ)
+
+- **คนสร้างทริป** เป็นเจ้าของ และได้อนุมัติอัตโนมัติ
+- **คนที่ได้ลิงก์เชิญ** ทำได้แค่ส่งคำขอ (ชื่อใหม่ หรืออ้างว่าเป็นสมาชิกเดิมที่ใช้เครื่องใหม่) แล้วรอ ระหว่างนี้เรียกได้แค่ `/me`
+- **เฉพาะเจ้าของทริป** เห็นและอนุมัติ/ปฏิเสธคำขอได้
+- รายชื่อที่คนถือรหัสเชิญเห็นมีแค่ชื่อ ไม่มีเบอร์พร้อมเพย์
+
+## API
+
+Base path `/api/v1` สถานะ: ไม่ส่ง token → 401 `token_required`, token ไม่ใช่ของทริปนี้ → 403 `not_a_member`, รออนุมัติ → 403 `pending_approval`, ถูกปฏิเสธ → 403 `join_rejected`
+
+| Method | Path | สิทธิ์ | หมายเหตุ |
+|---|---|---|---|
+| POST | `/trips` | ทุกคน | `{name, creator_name, base_currency?, promptpay?}` คืน `{trip, member, token}` |
+| GET | `/trips/{inviteCode}` | ทุกคน | `{trip, members: [{id, name}]}` |
+| POST | `/trips/{tripId}/join` | ทุกคน | `{name, promptpay?}` หรือ `{member_id}` คืน `{token, request}` (รอได้สูงสุด 20 คำขอต่อทริป) |
+| GET | `/trips/{tripId}/me` | มี token | `{status, member, is_owner, request}` |
+| GET | `/trips/{tripId}/members` | สมาชิก | |
+| GET | `/trips/{tripId}/expenses?category=&member=` | สมาชิก | `member` = คนจ่ายหรือคนที่หารด้วย |
+| POST/PUT | `/trips/{tripId}/expenses[/{id}]` | สมาชิก | ดูตัวอย่างด้านล่าง |
+| GET/DELETE | `/trips/{tripId}/expenses/{id}` | สมาชิก | |
+| GET | `/trips/{tripId}/balances` | สมาชิก | `net` บวก = ได้คืน, ลบ = ต้องจ่าย |
+| GET | `/trips/{tripId}/settlement` | สมาชิก | รายการโอนที่น้อยที่สุด |
+| POST | `/trips/{tripId}/settlements/paid` | สมาชิก | `{from, to, amount_base}` |
+| POST | `/trips/{tripId}/slips` | สมาชิก | multipart ไฟล์รูปได้สูงสุด 10 รูป |
+| PATCH | `/trips/{tripId}` | เจ้าของ | `{name?, base_currency?}` สกุลเงินหลักล็อกเมื่อมีรายจ่ายหรือการโอนคืนแล้ว (409 `currency_locked`) |
+| GET | `/trips/{tripId}/join-requests` | เจ้าของ | คำขอที่รออยู่ |
+| POST | `/trips/{tripId}/join-requests/{id}/approve` \| `reject` | เจ้าของ | |
+| GET | `/fx?from=CNY&to=THB[&date=YYYY-MM-DD]` | ทุกคน | อัตราแลกเปลี่ยน |
+| GET | `/fx/currencies` | ทุกคน | สกุลที่รองรับ |
 
 ตัวอย่างรายจ่าย (`amount` เป็นหน่วยย่อย 125000 = ฿1,250.00):
 
@@ -134,7 +157,11 @@ Base path `/api/v1` ทุก endpoint ใต้ `/trips/{tripId}` ยกเว�
 
 ดู `.env.example` ทั้ง backend และ frontend อ่านจากไฟล์ `.env` ที่ root (ไฟล์นี้อยู่ใน `.gitignore` แล้ว ห้าม commit)
 
+## ภาษา
+
+UI มี 2 ภาษา: **English (ค่าเริ่มต้น)** และ **ไทย** เลือกได้ในหน้าตั้งค่า แอปจำภาษาที่เลือกไว้ใน `localStorage` ข้อความทั้งหมดอยู่ที่ `frontend/src/i18n/en.ts` และ `th.ts` ซึ่ง TypeScript และ test บังคับให้ทั้งสองไฟล์มีคำครบเท่ากัน error จาก API จะแปลตาม `error.code` (ข้อความจาก server ใช้เมื่อไม่มีคำแปล) ส่วนวันที่, ตัวเลข และชื่อสกุลเงินใช้ `Intl` ตามภาษาที่เลือก
+
 ## ข้อตกลงในโค้ด
 
 - เงินเก็บเป็นจำนวนเต็มในหน่วยย่อยตามมาตรฐาน ISO 4217 (THB 2 ตำแหน่ง, JPY 0 ตำแหน่ง) ห้ามใช้ float
-- Error ของ API ใช้รูปแบบ `{ "error": { "code": "...", "message": "..." } }` เสมอ
+- Error ของ API ใช้รูปแบบ `{ "error": { "code": "...", "message": "..." } }` เสมอ เพิ่ม code ใหม่แล้วให้เพิ่มคำแปลใน `errors` ของทั้งสองภาษาด้วย

@@ -117,10 +117,10 @@ func TestProcessRejectsBadFilesAndRecordsFailures(t *testing.T) {
 		{Filename: "ok.heic", Data: heicBytes},
 	})
 
-	if out[0].Status != "failed" || out[0].SlipID != nil {
+	if out[0].Status != "failed" || out[0].SlipID != nil || out[0].ErrorCode != "unsupported_type" {
 		t.Fatalf("text file: %+v", out[0])
 	}
-	if out[1].Status != "failed" || out[1].SlipID != nil {
+	if out[1].Status != "failed" || out[1].SlipID != nil || out[1].ErrorCode != "too_large" {
 		t.Fatalf("huge file: %+v", out[1])
 	}
 	if out[2].Status != "failed" || out[2].SlipID == nil {
@@ -193,12 +193,12 @@ func TestRetryReaderDoesNotRetryOtherErrors(t *testing.T) {
 func TestSuggest(t *testing.T) {
 	s := suggest(&Result{Kind: "receipt", Amount: "1,250.50", Currency: "THB", DateTime: "2026-11-10T19:30:00+07:00",
 		Merchant: "Ichiran", Category: "food", Confidence: 0.95})
-	if s.Title != "Ichiran" || s.Amount == nil || *s.Amount != 125050 || s.SpentAt == nil || s.Category != "food" || s.LowConfid {
+	if s.Title != "Ichiran" || s.TitleKind != "merchant" || s.Amount == nil || *s.Amount != 125050 || s.SpentAt == nil || s.Category != "food" || s.LowConfid {
 		t.Fatalf("receipt suggestion %+v", s)
 	}
 
 	s = suggest(&Result{Kind: "transfer_slip", Amount: "12.345", Currency: "THB", ToName: "นาย ก", Category: "weird", Confidence: 0.3})
-	if s.Title != "โอนให้ นาย ก" || s.Amount != nil || s.SpentAt != nil || s.Category != "other" || !s.LowConfid {
+	if s.Title != "นาย ก" || s.TitleKind != "transfer_to" || s.Amount != nil || s.SpentAt != nil || s.Category != "other" || !s.LowConfid {
 		t.Fatalf("slip suggestion %+v", s)
 	}
 }

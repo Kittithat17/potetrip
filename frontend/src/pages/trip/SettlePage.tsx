@@ -1,27 +1,37 @@
 import { useBalances, useMarkPaid, useSettlement } from '../../api/hooks'
 import type { Transfer } from '../../api/types'
+import { Approx } from '../../components/Approx'
 import { Avatar, Button, Card, ErrorText, Page, PageHeader, Spinner } from '../../components/ui'
+import { useI18n } from '../../i18n/context'
+import { formatShortDate } from '../../lib/datetime'
+import { HOME_CURRENCY, useHomeApprox } from '../../lib/homeApprox'
 import { formatMoney } from '../../lib/money'
 import { useTrip } from './context'
+import { useConfirm } from '../../lib/confirm'
 
 export function SettlePage() {
-  const { trip, me, members, memberName, base } = useTrip()
+  const { t, locale } = useI18n()
+  const { trip, me, token, members, memberName, base, nav } = useTrip()
   const cur = trip.base_currency
-  const planQ = useSettlement(trip.id, me.id)
-  const balQ = useBalances(trip.id, me.id)
-  const paid = useMarkPaid(trip.id, me.id)
+  const planQ = useSettlement(trip.id, token)
+  const balQ = useBalances(trip.id, token)
+  const paid = useMarkPaid(trip.id, token)
+  const home = useHomeApprox(cur)
+  const confirm = useConfirm()
 
-  const onPaid = (t: Transfer) => {
-    if (!confirm(`ยืนยันว่า ${memberName(t.from)} โอนให้ ${memberName(t.to)} ${formatMoney(t.amount_base, cur)} แล้ว?`)) return
-    paid.mutate(t)
+  const onPaid = async (tr: Transfer) => {
+    const title = t('settle.confirmPaid', { from: memberName(tr.from), to: memberName(tr.to), amount: formatMoney(tr.amount_base, cur) })
+    if (!(await confirm({ title, tone: 'primary', confirmLabel: t('settle.paid') }))) return
+    paid.mutate(tr)
   }
 
   const transfers = planQ.data?.transfers ?? []
-  const mine = (t: Transfer) => t.from === me.id || t.to === me.id
+  const mine = (tr: Transfer) => tr.from === me.id || tr.to === me.id
+  const who = (id: string) => (id === me.id ? t('common.you') : memberName(id))
 
   return (
-    <Page>
-      <PageHeader title="ใครต้องโอนให้ใคร" back={base} />
+    <Page nav={nav}>
+      <PageHeader title={t('settle.title')} back={base} />
       <div className="space-y-4">
         <Card>
           {planQ.isPending ? (
@@ -29,27 +39,30 @@ export function SettlePage() {
           ) : planQ.error ? (
             <ErrorText error={planQ.error} />
           ) : transfers.length === 0 ? (
-            <p className="py-6 text-center text-slate-600">ไม่มีใครติดเงินใครแล้ว 🎉</p>
+            <p className="py-6 text-center text-slate-600">{t('settle.nothing')}</p>
           ) : (
             <ul className="space-y-3">
               {[...transfers]
                 .sort((a, b) => Number(mine(b)) - Number(mine(a)))
-                .map((t) => (
+                .map((tr) => (
                   <li
-                    key={`${t.from}-${t.to}`}
-                    className={`rounded-xl p-3 ring-1 ${mine(t) ? 'bg-amber-50 ring-amber-200' : 'ring-slate-200'}`}
+                    key={`${tr.from}-${tr.to}`}
+                    className={`rounded-xl p-3 ring-1 ${mine(tr) ? 'bg-amber-50 ring-amber-200' : 'ring-slate-200'}`}
                   >
                     <div className="flex items-center gap-2">
-                      <Avatar name={memberName(t.from)} size="sm" />
-                      <span className="font-medium">{t.from === me.id ? 'คุณ' : memberName(t.from)}</span>
+                      <Avatar name={memberName(tr.from)} size="sm" />
+                      <span className="font-medium">{who(tr.from)}</span>
                       <span className="text-slate-400">→</span>
-                      <Avatar name={memberName(t.to)} size="sm" />
-                      <span className="font-medium">{t.to === me.id ? 'คุณ' : memberName(t.to)}</span>
+                      <Avatar name={memberName(tr.to)} size="sm" />
+                      <span className="font-medium">{who(tr.to)}</span>
                     </div>
                     <div className="mt-2 flex items-center justify-between">
-                      <span className="text-xl font-bold tabular-nums">{formatMoney(t.amount_base, cur)}</span>
-                      <Button variant="secondary" className="min-h-9 text-sm" onClick={() => onPaid(t)} disabled={paid.isPending}>
-                        โอนแล้ว
+                      <span>
+                        <span className="block text-xl font-bold tabular-nums">{formatMoney(tr.amount_base, cur)}</span>
+                        <Approx minor={tr.amount_base} currency={cur} />
+                      </span>
+                      <Button variant="secondary" className="min-h-9 text-sm" onClick={() => onPaid(tr)} disabled={paid.isPending}>
+                        {t('settle.paid')}
                       </Button>
                     </div>
                   </li>
@@ -60,7 +73,7 @@ export function SettlePage() {
         </Card>
 
         <Card>
-          <h2 className="mb-2 font-bold">ยอดสุทธิของแต่ละคน</h2>
+          <h2 className="mb-2 font-bold">{t('settle.net')}</h2>
           {balQ.data && (
             <ul className="divide-y divide-slate-100">
               {balQ.data.balances.map((b) => (
@@ -69,7 +82,7 @@ export function SettlePage() {
                   <span className="flex-1">
                     {memberName(b.member_id)}
                     <span className="block text-xs text-slate-500">
-                      จ่ายไป {formatMoney(b.paid, cur)} · ส่วนตัวเอง {formatMoney(b.owed, cur)}
+                      {t('settle.summary', { paid: formatMoney(b.paid, cur), owed: formatMoney(b.owed, cur) })}
                     </span>
                   </span>
                   <span
@@ -77,12 +90,18 @@ export function SettlePage() {
                   >
                     {b.net > 0 ? '+' : ''}
                     {formatMoney(b.net, cur)}
+                    <Approx minor={b.net} currency={cur} className="text-right text-[11px] font-normal text-slate-400" />
                   </span>
                 </li>
               ))}
             </ul>
           )}
-          <p className="mt-2 text-xs text-slate-500">+ ได้คืน / − ต้องจ่าย · สมาชิก {members.length} คน</p>
+          <p className="mt-2 text-xs text-slate-500">{t('settle.legend', { n: members.length })}</p>
+          {home.rateDate && (
+            <p className="mt-1 text-xs text-slate-400">
+              {t('settle.approxNote', { home: HOME_CURRENCY, date: formatShortDate(home.rateDate, locale), cur })}
+            </p>
+          )}
         </Card>
       </div>
     </Page>

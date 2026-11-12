@@ -1,13 +1,17 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
+import { ChevronLeft } from 'lucide-react'
 import { Link } from 'react-router'
+import { BottomNav, type NavItem } from './shell'
 import { ApiError } from '../api/client'
+import { useI18n } from '../i18n/context'
 
-type Variant = 'primary' | 'secondary' | 'danger' | 'ghost'
+type Variant = 'primary' | 'secondary' | 'danger' | 'dangerSolid' | 'ghost'
 
 const variants: Record<Variant, string> = {
-  primary: 'bg-teal-700 text-white hover:bg-teal-800 disabled:bg-teal-700/50',
-  secondary: 'bg-white text-teal-800 ring-1 ring-teal-700/30 hover:bg-teal-50 disabled:opacity-50',
+  primary: 'bg-brand-700 text-white hover:bg-brand-800 disabled:bg-brand-700/50',
+  secondary: 'bg-white text-brand-800 ring-1 ring-brand-700/30 hover:bg-brand-50 disabled:opacity-50',
   danger: 'bg-white text-red-700 ring-1 ring-red-300 hover:bg-red-50 disabled:opacity-50',
+  dangerSolid: 'bg-red-600 text-white hover:bg-red-700 disabled:bg-red-600/50',
   ghost: 'text-slate-600 hover:bg-slate-100 disabled:opacity-50',
 }
 
@@ -39,7 +43,7 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
 }
 
 export const inputBase =
-  'block min-h-11 rounded-xl border-0 bg-white px-3 text-base ring-1 ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-teal-600 focus:outline-none'
+  'block min-h-11 rounded-xl border-0 bg-white px-3 text-base ring-1 ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-brand-600 focus:outline-none'
 export const inputClass = `${inputBase} w-full`
 
 export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
@@ -47,8 +51,15 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
 }
 
 export function ErrorText({ error }: { error: unknown }) {
+  const { tryT } = useI18n()
   if (!error) return null
-  const msg = error instanceof ApiError ? error.message : error instanceof Error ? error.message : String(error)
+  // API errors are shown in the UI language by their code; the server's own text is the fallback.
+  const msg =
+    error instanceof ApiError
+      ? (tryT(`errors.${error.code}`) ?? error.message)
+      : error instanceof Error
+        ? error.message
+        : String(error)
   return (
     <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
       {msg}
@@ -56,21 +67,23 @@ export function ErrorText({ error }: { error: unknown }) {
   )
 }
 
-export function Spinner({ label = 'กำลังโหลด…' }: { label?: string }) {
+export function Spinner({ label }: { label?: string }) {
+  const { t } = useI18n()
   return (
     <div className="flex items-center justify-center gap-2 py-10 text-slate-500" role="status">
-      <span className="size-4 animate-spin rounded-full border-2 border-teal-600 border-t-transparent" />
-      {label}
+      <span className="size-4 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+      {label ?? t('common.loading')}
     </div>
   )
 }
 
 export function PageHeader({ title, back, right }: { title: string; back?: string; right?: ReactNode }) {
+  const { t } = useI18n()
   return (
-    <header className="sticky top-0 z-10 -mx-4 mb-4 flex items-center gap-2 bg-slate-50/90 px-4 py-3 backdrop-blur">
+    <header className="sticky top-0 z-10 -mx-4 mb-4 flex items-center gap-1 bg-gradient-to-r from-brand-700 to-brand-500 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-3 text-white shadow-sm">
       {back && (
-        <Link to={back} className="-ml-2 rounded-lg px-2 py-1 text-xl text-slate-600 hover:bg-slate-200" aria-label="ย้อนกลับ">
-          ‹
+        <Link to={back} className="-ml-2 rounded-full p-1 hover:bg-white/15" aria-label={t('common.back')}>
+          <ChevronLeft className="size-7" />
         </Link>
       )}
       <h1 className="min-w-0 flex-1 truncate text-lg font-bold">{title}</h1>
@@ -79,8 +92,13 @@ export function PageHeader({ title, back, right }: { title: string; back?: strin
   )
 }
 
-export function Page({ children }: { children: ReactNode }) {
-  return <main className="mx-auto min-h-dvh max-w-md px-4 pb-[calc(env(safe-area-inset-bottom)+2rem)]">{children}</main>
+export function Page({ children, nav }: { children: ReactNode; nav?: NavItem[] }) {
+  return (
+    <>
+      <main className={`mx-auto min-h-dvh max-w-md px-4 ${nav ? 'pb-28' : 'pb-[calc(env(safe-area-inset-bottom)+2rem)]'}`}>{children}</main>
+      {nav && <BottomNav items={nav} />}
+    </>
+  )
 }
 
 export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {

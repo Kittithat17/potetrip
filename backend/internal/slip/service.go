@@ -30,9 +30,12 @@ type Upload struct {
 
 // Suggestion is the Result normalised for the expense form. Fields the
 // model could not read reliably are nil so the user fills them in.
+// Title is the merchant or, for a transfer, the receiver's name; the client
+// adds wording around it in the user's language.
 type Suggestion struct {
 	Title     string     `json:"title"`
-	Amount    *int64     `json:"amount"` // minor units of Currency
+	TitleKind string     `json:"title_kind"` // merchant | transfer_to | none
+	Amount    *int64     `json:"amount"`     // minor units of Currency
 	Currency  string     `json:"currency"`
 	SpentAt   *time.Time `json:"spent_at"`
 	Category  string     `json:"category"`
@@ -43,7 +46,8 @@ type Suggestion struct {
 type Outcome struct {
 	Filename   string      `json:"filename"`
 	SlipID     *uuid.UUID  `json:"slip_id"`
-	Status     string      `json:"status"` // parsed | failed
+	Status     string      `json:"status"`               // parsed | failed
+	ErrorCode  string      `json:"error_code,omitempty"` // unsupported_type | too_large | read_failed | rate_limited | ai_busy | cancelled
 	Error      string      `json:"error,omitempty"`
 	Result     *Result     `json:"result,omitempty"`
 	Suggestion *Suggestion `json:"suggestion,omitempty"`
@@ -81,7 +85,7 @@ func (s *Service) Process(ctx context.Context, tripID, uploadedBy uuid.UUID, upl
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
 			case <-ctx.Done():
-				out[i] = Outcome{Filename: u.Filename, Status: "failed", Error: "ยกเลิกแล้ว"}
+				out[i] = Outcome{Filename: u.Filename, Status: "failed", ErrorCode: "cancelled", Error: "ยกเลิกแล้ว"}
 				return
 			}
 			out[i] = s.processOne(ctx, tripID, uploadedBy, u)
@@ -96,18 +100,18 @@ func (s *Service) processOne(ctx context.Context, tripID, uploadedBy uuid.UUID, 
 
 	mime := DetectImageType(u.Data)
 	if mime == "" {
-		o.Error = "รองรับเฉพาะรูป JPEG, PNG, WebP หรือ HEIC"
+		o.ErrorCode, o.Error = "unsupported_type", "รองรับเฉพาะรูป JPEG, PNG, WebP หรือ HEIC"
 		return o
 	}
 	if len(u.Data) > MaxFileSize {
-		o.Error = "ไฟล์ใหญ่เกิน 8MB"
+		o.ErrorCode, o.Error = "too_large", "ไฟล์ใหญ่เกิน 8MB"
 		return o
 	}
 
 	row, err := s.store.CreateSlip(ctx, db.CreateSlipParams{TripID: tripID, UploadedBy: uploadedBy})
 	if err != nil {
 		slog.ErrorContext(ctx, "create slip", "err", err)
-		o.Error = errorMessage
+		o.ErrorCode, o.Error = "read_failed", errorMessage
 		return o
 	}
 	o.SlipID = &row.ID
@@ -121,12 +125,12 @@ func (s *Service) processOne(ctx context.Context, tripID, uploadedBy uuid.UUID, 
 		slog.WarnContext(ctx, "slip read failed", "slip", row.ID, "err", err)
 		msg := err.Error()
 		finish.Error = &msg
-		o.Error = errorMessage
+		o.ErrorCode, o.Error = "read_failed", errorMessage
 		switch {
 		case errors.Is(err, ErrRateLimited):
-			o.Error = "AI ใช้งานเกินโควตาชั่วคราว รอสักครู่แล้วลองใหม่"
+			o.ErrorCode, o.Error = "rate_limited", "AI ใช้งานเกินโควตาชั่วคราว รอสักครู่แล้วลองใหม่"
 		case errors.Is(err, ErrUnavailable):
-			o.Error = "AI ไม่ว่างชั่วคราว รอสักครู่แล้วลองใหม่"
+			o.ErrorCode, o.Error = "ai_busy", "AI ไม่ว่างชั่วคราว รอสักครู่แล้วลองใหม่"
 		}
 	} else {
 		raw, _ := json.Marshal(res)
@@ -152,11 +156,11 @@ func suggest(r *Result) *Suggestion {
 	}
 	switch {
 	case strings.TrimSpace(r.Merchant) != "":
-		s.Title = strings.TrimSpace(r.Merchant)
+		s.Title, s.TitleKind = strings.TrimSpace(r.Merchant), "merchant"
 	case strings.TrimSpace(r.ToName) != "":
-		s.Title = "โอนให้ " + strings.TrimSpace(r.ToName)
+		s.Title, s.TitleKind = strings.TrimSpace(r.ToName), "transfer_to"
 	default:
-		s.Title = "สลิป"
+		s.TitleKind = "none"
 	}
 	if r.Currency != "" && r.Amount != "" {
 		if v, err := money.ParseDecimal(r.Amount, r.Currency); err == nil && v > 0 {

@@ -109,6 +109,9 @@ func (s *Service) Create(ctx context.Context, trip db.Trip, createdBy uuid.UUID,
 	var out View
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
+		if err := checkCurrency(ctx, q, trip.ID, p.in.Currency); err != nil {
+			return err
+		}
 		if p.in.SlipID != nil {
 			n, err := q.ConfirmSlip(ctx, db.ConfirmSlipParams{ID: *p.in.SlipID, TripID: trip.ID})
 			if err != nil {
@@ -152,6 +155,9 @@ func (s *Service) Update(ctx context.Context, trip db.Trip, id uuid.UUID, in Inp
 	var out View
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
+		if err := checkCurrency(ctx, q, trip.ID, p.in.Currency); err != nil {
+			return err
+		}
 		e, err := q.UpdateExpense(ctx, db.UpdateExpenseParams{
 			ID:         id,
 			TripID:     trip.ID,
@@ -352,6 +358,19 @@ func computeShares(in Input, amountBase int64, order map[uuid.UUID]int) ([]Share
 	default:
 		return nil, apperr.Invalid("invalid_split", "วิธีหารไม่ถูกต้อง")
 	}
+}
+
+// checkCurrency locks the trip row for share and confirms its base currency
+// still matches what the expense was validated against.
+func checkCurrency(ctx context.Context, q *db.Queries, tripID uuid.UUID, currency string) error {
+	cur, err := q.TripCurrencyForShare(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	if cur != currency {
+		return apperr.Conflict("currency_changed", "สกุลเงินหลักของทริปเพิ่งถูกเปลี่ยน ลองบันทึกใหม่อีกครั้ง")
+	}
+	return nil
 }
 
 func uniqueMembers(ids []uuid.UUID, order map[uuid.UUID]int) ([]uuid.UUID, error) {

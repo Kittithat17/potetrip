@@ -2,8 +2,28 @@
 
 @theme {
   --font-sans: "Noto Sans Thai", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  /* Brand blue */
+  --color-brand-50: #eef3ff;
+  --color-brand-100: #dfe8ff;
+  --color-brand-200: #c4d4ff;
+  --color-brand-300: #9db6ff;
+  --color-brand-400: #7090ff;
+  --color-brand-500: #4a6bff;
+  --color-brand-600: #2f4cf5;
+  --color-brand-700: #2339d9;
+  --color-brand-800: #2131af;
+  --color-brand-900: #212f89;
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-slate-100 text-slate-900 antialiased;
+}
+
+/* Hide horizontal scrollbars on chip/card rails while keeping them scrollable. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

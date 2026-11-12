@@ -40,3 +40,12 @@ export function rememberTrip(t: Omit<RecentTrip, 'visitedAt'>, now = Date.now())
 export function forgetTrip(id: string): void {
   save(getRecentTrips().filter((x) => x.id !== id))
 }
+
+/** Removes every remembered trip from this device (trip data on the server is untouched). */
+export function forgetAllTrips(): void {
+  try {
+    localStorage.removeItem(KEY)
+  } catch {
+    /* storage unavailable */
+  }
+}

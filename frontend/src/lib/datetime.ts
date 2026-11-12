@@ -10,8 +10,17 @@ export function fromLocalInput(v: string): string {
   return new Date(v).toISOString()
 }
 
-const fmt = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+const fmts = new Map<string, Intl.DateTimeFormat>()
 
-export function formatShortDateTime(iso: string): string {
-  return fmt.format(new Date(iso))
+export function formatShortDateTime(iso: string, locale = 'en-GB'): string {
+  let f = fmts.get(locale)
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    fmts.set(locale, f)
+  }
+  return f.format(new Date(iso))
+}
+
+export function formatShortDate(isoDate: string, locale = 'en-GB'): string {
+  return new Date(isoDate).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: '2-digit' })
 }

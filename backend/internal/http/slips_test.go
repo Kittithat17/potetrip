@@ -50,18 +50,14 @@ func TestSlipUploadAndConfirm(t *testing.T) {
 	}).Routes()
 	c := &apiClient{t: t, h: h}
 
-	var tr, other tripResp
-	c.do("POST", "/trips", map[string]any{"name": "สลิป"}, 201, &tr)
-	c.do("POST", "/trips", map[string]any{"name": "อีกทริป"}, 201, &other)
-	var me, outsider memberResp
-	c.do("POST", "/trips/"+tr.ID+"/members", map[string]any{"name": "แบงก์"}, 201, &me)
-	c.do("POST", "/trips/"+other.ID+"/members", map[string]any{"name": "คนนอก"}, 201, &outsider)
+	tr, me, myToken := c.newTrip("สลิป", "แบงก์")
+	other, _, outsiderToken := c.newTrip("อีกทริป", "คนนอก")
 
-	upload := func(tripID, memberID string, files map[string][]byte, want int) map[string]any {
+	upload := func(tripID, token string, files map[string][]byte, want int) map[string]any {
 		body, ct := multipartBody(t, files)
 		req := httptest.NewRequest("POST", "/api/v1/trips/"+tripID+"/slips", body)
 		req.Header.Set("Content-Type", ct)
-		req.Header.Set("X-Member-Id", memberID)
+		req.Header.Set(TokenHeader, token)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code != want {
@@ -72,7 +68,7 @@ func TestSlipUploadAndConfirm(t *testing.T) {
 		return out
 	}
 
-	out := upload(tr.ID, me.ID, map[string][]byte{"a.png": pngHeader, "b.txt": []byte("not an image")}, 200)
+	out := upload(tr.ID, myToken, map[string][]byte{"a.png": pngHeader, "b.txt": []byte("not an image")}, 200)
 	results := out["results"].([]any)
 	if len(results) != 2 {
 		t.Fatalf("results %v", results)
@@ -94,10 +90,10 @@ func TestSlipUploadAndConfirm(t *testing.T) {
 		}
 	}
 
-	upload(tr.ID, me.ID, map[string][]byte{}, 400)
+	upload(tr.ID, myToken, map[string][]byte{}, 400)
 
 	// Confirm the slip as an expense; it cannot be used twice or from another trip.
-	c.me = me.ID
+	c.me = myToken
 	exp := map[string]any{"title": "Ichiran", "category": "food", "paid_by": me.ID, "amount": 125000,
 		"split_type": "equal", "member_ids": []string{me.ID}, "slip_id": slipID}
 	var created struct {
@@ -111,7 +107,7 @@ func TestSlipUploadAndConfirm(t *testing.T) {
 		t.Fatal(code)
 	}
 
-	out = upload(other.ID, outsider.ID, map[string][]byte{"c.png": pngHeader}, 200)
+	out = upload(other.ID, outsiderToken, map[string][]byte{"c.png": pngHeader}, 200)
 	otherSlip := out["results"].([]any)[0].(map[string]any)["slip_id"].(string)
 	exp["slip_id"] = otherSlip
 	if code := c.errCode("POST", "/trips/"+tr.ID+"/expenses", exp, 409); code != "slip_unavailable" {
@@ -128,15 +124,12 @@ func TestSlipUploadDisabled(t *testing.T) {
 	pool := testdb.New(t)
 	h := NewServer(Deps{DB: pool, Trips: trip.NewService(pool), Expenses: expense.NewService(pool), Settlements: settlement.NewService(pool)}).Routes()
 	c := &apiClient{t: t, h: h}
-	var tr tripResp
-	var me memberResp
-	c.do("POST", "/trips", map[string]any{"name": "x"}, 201, &tr)
-	c.do("POST", "/trips/"+tr.ID+"/members", map[string]any{"name": "a"}, 201, &me)
+	tr, _, token := c.newTrip("x", "a")
 
 	body, ct := multipartBody(t, map[string][]byte{"a.png": pngHeader})
 	req := httptest.NewRequest("POST", "/api/v1/trips/"+tr.ID+"/slips", body)
 	req.Header.Set("Content-Type", ct)
-	req.Header.Set("X-Member-Id", me.ID)
+	req.Header.Set(TokenHeader, token)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {

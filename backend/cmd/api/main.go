@@ -16,6 +16,7 @@ import (
 	"github.com/raisin/travel-split/backend/internal/config"
 	"github.com/raisin/travel-split/backend/internal/db"
 	"github.com/raisin/travel-split/backend/internal/expense"
+	"github.com/raisin/travel-split/backend/internal/fx"
 	apihttp "github.com/raisin/travel-split/backend/internal/http"
 	"github.com/raisin/travel-split/backend/internal/settlement"
 	"github.com/raisin/travel-split/backend/internal/slip"
@@ -61,6 +62,7 @@ func run() error {
 			Expenses:    expense.NewService(pool),
 			Settlements: settlement.NewService(pool),
 			Slips:       slips,
+			FX:          fx.NewService(fx.NewFrankfurter(cfg.FXBaseURL), db.New(pool)),
 			CORSOrigins: cfg.CORSOrigins,
 		}).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
