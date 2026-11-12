@@ -5,7 +5,7 @@ export
 GO_TOOL  := go tool -modfile=tools/go.mod
 GOOSE    := cd backend && $(GO_TOOL) goose -dir migrations postgres "$(DATABASE_URL)"
 
-.PHONY: help setup dev dev-backend dev-frontend db-up db-down db-reset \
+.PHONY: help setup dev dev-lan dev-backend dev-frontend db-up db-down db-reset \
         migrate migrate-down migrate-status migrate-new sqlc test test-backend \
         test-frontend test-unit lint build
 
@@ -21,6 +21,14 @@ dev: db-up migrate ## รัน postgres + backend + frontend พร้อมก
 	@trap 'kill 0' INT TERM EXIT; \
 	  $(MAKE) --no-print-directory dev-backend & \
 	  $(MAKE) --no-print-directory dev-frontend & \
+	  wait
+
+dev-lan: db-up migrate ## เหมือน dev แต่ให้มือถือใน Wi-Fi เดียวกันเปิดได้
+	@IP=$$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null); \
+	  echo ""; echo "  📱 เปิดบนมือถือ (Wi-Fi เดียวกัน): http://$$IP:5173"; echo ""; \
+	  trap 'kill 0' INT TERM EXIT; \
+	  $(MAKE) --no-print-directory dev-backend & \
+	  (cd frontend && pnpm dev --host) & \
 	  wait
 
 dev-backend: ## รัน backend อย่างเดียว

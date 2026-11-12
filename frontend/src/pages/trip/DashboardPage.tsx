@@ -29,16 +29,22 @@ export function DashboardPage() {
 
   const share = async () => {
     const url = inviteLink(trip.invite_code)
-    try {
-      if (navigator.share) {
+    if (navigator.share) {
+      try {
         await navigator.share({ title: trip.name, text: `มาหารค่าใช้จ่ายทริป "${trip.name}" กัน`, url })
-        return
+      } catch {
+        /* user closed the share sheet */
       }
+      return
+    }
+    try {
       await navigator.clipboard.writeText(url)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      /* user cancelled share sheet */
+      // Clipboard and share need HTTPS; on plain http (e.g. testing over
+      // Wi-Fi) show the link so it can be copied by hand.
+      window.prompt('คัดลอกลิงก์นี้ส่งให้เพื่อน', url)
     }
   }
 

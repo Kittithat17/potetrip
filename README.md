@@ -28,6 +28,14 @@ make dev       # เปิด postgres, รัน migration, แล้วรั�
 
 > แก้โค้ด backend แล้วต้องหยุด `make dev` แล้วรันใหม่ (frontend reload ให้เอง)
 
+### ลองบนมือถือ (Wi-Fi เดียวกัน)
+
+```bash
+make dev-lan
+```
+
+terminal จะพิมพ์ลิงก์เช่น `http://192.168.1.112:5173` ให้เปิดบนมือถือที่ต่อ Wi-Fi เดียวกับคอม ถ้าเปิดไม่ได้ ให้เช็กว่า macOS Firewall อนุญาต `node` (System Settings → Network → Firewall) ข้อจำกัดของ http: ปุ่มแชร์จะแสดงลิงก์ให้คัดลอกเองแทน และยังติดตั้งเป็นแอปไม่ได้จนกว่าจะ deploy บน https อย่าใช้ `dev-lan` บน Wi-Fi สาธารณะ
+
 ตรวจ backend ตรงๆ:
 
 ```bash
@@ -40,6 +48,7 @@ curl localhost:8081/api/v1/healthz   # เหมือนกัน
 | คำสั่ง | หน้าที่ |
 |---|---|
 | `make dev` | รันทุกอย่างพร้อมกัน (Ctrl+C หยุดทั้งหมด) |
+| `make dev-lan` | เหมือน `dev` แต่ให้มือถือใน Wi-Fi เดียวกันเปิดได้ |
 | `make dev-backend` / `make dev-frontend` | รันทีละฝั่ง |
 | `make db-up` / `make db-down` | เปิด/ปิด Postgres |
 | `make db-reset` | ลบข้อมูล DB dev ทั้งหมดแล้วสร้างใหม่ |
