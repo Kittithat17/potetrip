@@ -122,8 +122,11 @@ func (s *Service) processOne(ctx context.Context, tripID, uploadedBy uuid.UUID, 
 		msg := err.Error()
 		finish.Error = &msg
 		o.Error = errorMessage
-		if errors.Is(err, ErrRateLimited) {
+		switch {
+		case errors.Is(err, ErrRateLimited):
 			o.Error = "AI ใช้งานเกินโควตาชั่วคราว รอสักครู่แล้วลองใหม่"
+		case errors.Is(err, ErrUnavailable):
+			o.Error = "AI ไม่ว่างชั่วคราว รอสักครู่แล้วลองใหม่"
 		}
 	} else {
 		raw, _ := json.Marshal(res)

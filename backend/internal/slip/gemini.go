@@ -54,8 +54,13 @@ func (g *GeminiReader) Read(ctx context.Context, image []byte, mimeType string) 
 	})
 	if err != nil {
 		var apiErr genai.APIError
-		if errors.As(err, &apiErr) && apiErr.Code == 429 {
-			return nil, fmt.Errorf("%w: %s", ErrRateLimited, apiErr.Message)
+		if errors.As(err, &apiErr) {
+			switch apiErr.Code {
+			case 429:
+				return nil, fmt.Errorf("%w: %s", ErrRateLimited, apiErr.Message)
+			case 503:
+				return nil, fmt.Errorf("%w: %s", ErrUnavailable, apiErr.Message)
+			}
 		}
 		return nil, err
 	}

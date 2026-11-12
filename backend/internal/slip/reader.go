@@ -32,5 +32,8 @@ type Reader interface {
 	Read(ctx context.Context, image []byte, mimeType string) (*Result, error)
 }
 
-// ErrRateLimited marks errors that are worth retrying after a pause (HTTP 429).
+// ErrRateLimited marks quota errors (HTTP 429). Worth retrying after a pause.
 var ErrRateLimited = errors.New("rate limited")
+
+// ErrUnavailable marks a temporarily overloaded model (HTTP 503). Also retried.
+var ErrUnavailable = errors.New("model temporarily unavailable")

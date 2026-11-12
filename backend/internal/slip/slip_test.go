@@ -142,8 +142,11 @@ func TestProcessRejectsBadFilesAndRecordsFailures(t *testing.T) {
 
 func TestRetryReaderBacksOffOnRateLimit(t *testing.T) {
 	r := &mockReader{fn: func(call int32, _ []byte) (*Result, error) {
-		if call <= 2 {
+		switch call {
+		case 1:
 			return nil, fmt.Errorf("%w: slow down", ErrRateLimited)
+		case 2:
+			return nil, fmt.Errorf("%w: high demand", ErrUnavailable)
 		}
 		return &Result{Kind: "receipt"}, nil
 	}}

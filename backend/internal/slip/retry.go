@@ -6,7 +6,8 @@ import (
 	"time"
 )
 
-// RetryReader retries rate-limited reads with exponential backoff.
+// RetryReader retries transient failures (429 rate limit, 503 overload)
+// with exponential backoff.
 type RetryReader struct {
 	Next       Reader
 	MaxRetries int           // retries after the first attempt
@@ -22,7 +23,7 @@ func (r *RetryReader) Read(ctx context.Context, image []byte, mimeType string) (
 	delay := r.BaseDelay
 	for attempt := 0; ; attempt++ {
 		res, err := r.Next.Read(ctx, image, mimeType)
-		if err == nil || !errors.Is(err, ErrRateLimited) || attempt >= r.MaxRetries {
+		if err == nil || !retryable(err) || attempt >= r.MaxRetries {
 			return res, err
 		}
 		if err := r.sleep(ctx, delay); err != nil {
@@ -41,4 +42,8 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
+}
+
+func retryable(err error) bool {
+	return errors.Is(err, ErrRateLimited) || errors.Is(err, ErrUnavailable)
 }
