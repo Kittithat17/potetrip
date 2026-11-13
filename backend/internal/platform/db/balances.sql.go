@@ -12,16 +12,17 @@ import (
 )
 
 const createSettlementPaid = `-- name: CreateSettlementPaid :one
-INSERT INTO settlements_paid (trip_id, from_member, to_member, amount_base)
-VALUES ($1, $2, $3, $4)
-RETURNING id, trip_id, from_member, to_member, amount_base, paid_at
+INSERT INTO settlements_paid (trip_id, from_member, to_member, amount_base, created_by)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, trip_id, from_member, to_member, amount_base, paid_at, created_by
 `
 
 type CreateSettlementPaidParams struct {
-	TripID     uuid.UUID `json:"trip_id"`
-	FromMember uuid.UUID `json:"from_member"`
-	ToMember   uuid.UUID `json:"to_member"`
-	AmountBase int64     `json:"amount_base"`
+	TripID     uuid.UUID  `json:"trip_id"`
+	FromMember uuid.UUID  `json:"from_member"`
+	ToMember   uuid.UUID  `json:"to_member"`
+	AmountBase int64      `json:"amount_base"`
+	CreatedBy  *uuid.UUID `json:"created_by"`
 }
 
 func (q *Queries) CreateSettlementPaid(ctx context.Context, arg CreateSettlementPaidParams) (SettlementsPaid, error) {
@@ -30,6 +31,7 @@ func (q *Queries) CreateSettlementPaid(ctx context.Context, arg CreateSettlement
 		arg.FromMember,
 		arg.ToMember,
 		arg.AmountBase,
+		arg.CreatedBy,
 	)
 	var i SettlementsPaid
 	err := row.Scan(
@@ -39,12 +41,13 @@ func (q *Queries) CreateSettlementPaid(ctx context.Context, arg CreateSettlement
 		&i.ToMember,
 		&i.AmountBase,
 		&i.PaidAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
 
 const listSettlementsPaid = `-- name: ListSettlementsPaid :many
-SELECT id, trip_id, from_member, to_member, amount_base, paid_at FROM settlements_paid
+SELECT id, trip_id, from_member, to_member, amount_base, paid_at, created_by FROM settlements_paid
 WHERE trip_id = $1
 ORDER BY paid_at, id
 `
@@ -65,6 +68,7 @@ func (q *Queries) ListSettlementsPaid(ctx context.Context, tripID uuid.UUID) ([]
 			&i.ToMember,
 			&i.AmountBase,
 			&i.PaidAt,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}

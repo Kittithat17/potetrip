@@ -15,7 +15,7 @@ import { PromptPayDialog } from './PromptPayDialog'
 
 export function SettlePage() {
   const { t, locale } = useI18n()
-  const { trip, me, members, memberName, base, nav } = useTrip()
+  const { trip, me, isOwner, members, memberName, base, nav } = useTrip()
   const cur = trip.base_currency
   const planQ = useSettlement(trip.id)
   const balQ = useBalances(trip.id)
@@ -74,9 +74,11 @@ export function SettlePage() {
                             <QrCode className="size-4" /> {t('settle.qr')}
                           </Button>
                         )}
-                        <Button variant="secondary" className="min-h-9 text-sm" onClick={() => onPaid(tr)} disabled={paid.isPending}>
-                          {t('settle.paid')}
-                        </Button>
+                        {(mine(tr) || isOwner) && (
+                          <Button variant="secondary" className="min-h-9 text-sm" onClick={() => onPaid(tr)} disabled={paid.isPending}>
+                            {t('settle.paid')}
+                          </Button>
+                        )}
                       </span>
                     </div>
                     {tr.to === me.id && !promptpayOf(tr.to) && (

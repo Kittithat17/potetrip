@@ -50,6 +50,12 @@ func TestSPA(t *testing.T) {
 			t.Fatalf("%s leaked a file outside the web root", p)
 		}
 	}
+	// Files that don't exist are 404, not the app shell.
+	for _, p := range []string{"/.env", "/.git/config", "/backup.sql", "/assets/missing.js.map"} {
+		if rec := get("GET", p); rec.Code != 404 {
+			t.Fatalf("%s: %d", p, rec.Code)
+		}
+	}
 	// Unknown API paths stay JSON, writes to pages are refused, health still works.
 	if rec := get("GET", "/api/v1/nope"); rec.Code != 404 || !strings.Contains(rec.Body.String(), `"not_found"`) {
 		t.Fatalf("api 404: %d %s", rec.Code, rec.Body)

@@ -85,6 +85,55 @@ func (q *Queries) ListMembers(ctx context.Context, tripID uuid.UUID) ([]Member, 
 	return items, nil
 }
 
+const listMembersWithLink = `-- name: ListMembersWithLink :many
+SELECT m.id, m.name,
+       EXISTS (SELECT 1 FROM devices d
+               WHERE d.member_id = m.id AND d.status = 'approved' AND d.user_id IS NOT NULL) AS linked
+FROM members m
+WHERE m.trip_id = $1
+ORDER BY m.created_at, m.id
+`
+
+type ListMembersWithLinkRow struct {
+	ID     uuid.UUID `json:"id"`
+	Name   string    `json:"name"`
+	Linked bool      `json:"linked"`
+}
+
+// linked: some signed-in account already acts as this member, so nobody
+// else may claim to be them.
+func (q *Queries) ListMembersWithLink(ctx context.Context, tripID uuid.UUID) ([]ListMembersWithLinkRow, error) {
+	rows, err := q.db.Query(ctx, listMembersWithLink, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMembersWithLinkRow{}
+	for rows.Next() {
+		var i ListMembersWithLinkRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Linked); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const memberLinked = `-- name: MemberLinked :one
+SELECT EXISTS (SELECT 1 FROM devices d
+               WHERE d.member_id = $1 AND d.status = 'approved' AND d.user_id IS NOT NULL)
+`
+
+func (q *Queries) MemberLinked(ctx context.Context, memberID *uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, memberLinked, memberID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const updateMemberPromptPay = `-- name: UpdateMemberPromptPay :one
 UPDATE members SET promptpay = $3
 WHERE id = $1 AND trip_id = $2

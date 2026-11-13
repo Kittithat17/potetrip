@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -35,25 +36,35 @@ type Deps struct {
 	FX          *fx.Service
 	CORSOrigins []string
 	StaticDir   string // built web app to serve (production); empty in dev, where Vite serves it
+	// TrustProxy: behind Cloudflare, take the client IP from CF-Connecting-IP
+	// (for rate limits). Off when clients connect directly.
+	TrustProxy bool
 }
 
 type Server struct {
 	Deps
+	lim         *limits
+	logIPSource sync.Once
 }
 
-func NewServer(d Deps) *Server { return &Server{Deps: d} }
+func NewServer(d Deps) *Server { return &Server{Deps: d, lim: defaultLimits()} }
 
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
+	r.Use(requestLog)
 	r.Use(middleware.Recoverer)
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: s.CORSOrigins,
-		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Content-Type", CSRFHeader},
-		MaxAge:         300,
-	}))
+	// Production serves the app and API from one origin and needs no CORS;
+	// it's only for a frontend on another origin during development.
+	if len(s.CORSOrigins) > 0 {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins: s.CORSOrigins,
+			AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowedHeaders: []string{"Content-Type", CSRFHeader},
+			MaxAge:         300,
+		}))
+	}
+	byIP := s.clientIP
 
 	r.Get("/healthz", s.healthz)
 	r.Route("/api/v1", func(r chi.Router) {
@@ -62,16 +73,22 @@ func (s *Server) Routes() http.Handler {
 
 		r.Route("/auth", func(r chi.Router) {
 			r.Get("/config", s.authConfig)
-			r.Get("/google/start", s.googleStart)
-			r.Get("/google/callback", s.googleCallback)
-			r.Post("/mock", s.mockLogin)
 			r.Post("/logout", s.logout)
-			r.Post("/passkey/signup/begin", s.passkeySignupBegin)
-			r.Post("/passkey/signup/finish", s.passkeySignupFinish)
-			r.Post("/passkey/login/begin", s.passkeyLoginBegin)
-			r.Post("/passkey/login/finish", s.passkeyLoginFinish)
+			// Sign-in steps anyone can call: limited per IP so nobody can
+			// flood the DB with challenges or accounts.
+			r.Group(func(r chi.Router) {
+				r.Use(s.limit(s.lim.authIP, byIP))
+				r.Get("/google/start", s.googleStart)
+				r.Get("/google/callback", s.googleCallback)
+				r.Post("/mock", s.mockLogin)
+				r.With(s.limit(s.lim.signupIP, byIP)).Post("/passkey/signup/begin", s.passkeySignupBegin)
+				r.Post("/passkey/signup/finish", s.passkeySignupFinish)
+				r.Post("/passkey/login/begin", s.passkeyLoginBegin)
+				r.Post("/passkey/login/finish", s.passkeyLoginFinish)
+			})
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireUser)
+				r.Use(s.writesOnly(s.lim.writes, byUser))
 				r.Get("/me", s.authMe)
 				r.Post("/claim", s.claimDevices)
 				r.Post("/passkey/register/begin", s.passkeyRegisterBegin)
@@ -84,8 +101,9 @@ func (s *Server) Routes() http.Handler {
 		// Everything else needs a signed-in user.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireUser)
+			r.Use(s.writesOnly(s.lim.writes, byUser))
 			r.Get("/me/trips", s.myTrips)
-			r.Post("/trips", s.createTrip)
+			r.With(s.limit(s.lim.newTrips, byUser)).Post("/trips", s.createTrip)
 			r.Get("/fx", s.fxRate)
 			r.Get("/fx/currencies", s.fxCurrencies)
 
@@ -96,7 +114,7 @@ func (s *Server) Routes() http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(s.loadTrip)
 					// Anyone holding the trip ID may ask to join; nothing else.
-					r.Post("/join", s.requestJoin)
+					r.With(s.limit(s.lim.newTrips, byUser)).Post("/join", s.requestJoin)
 
 					r.Group(func(r chi.Router) {
 						r.Use(s.requireDevice)
@@ -114,8 +132,9 @@ func (s *Server) Routes() http.Handler {
 							r.Get("/balances", s.balances)
 							r.Get("/settlement", s.settlementPlan)
 							r.Post("/settlements/paid", s.markPaid)
-							r.Post("/slips", s.uploadSlips)
+							r.With(s.limit(s.lim.slips, byUser)).Post("/slips", s.uploadSlips)
 							r.Get("/summary", s.summary)
+							r.Get("/activity", s.activity)
 							r.Patch("/me", s.updateMe)
 
 							r.Group(func(r chi.Router) {
@@ -124,6 +143,7 @@ func (s *Server) Routes() http.Handler {
 								r.Get("/join-requests", s.listJoinRequests)
 								r.Post("/join-requests/{request}/approve", s.approveJoin)
 								r.Post("/join-requests/{request}/reject", s.rejectJoin)
+								r.Post("/join-requests/reject-all", s.rejectAllJoins)
 							})
 						})
 					})

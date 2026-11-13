@@ -17,6 +17,6 @@ WHERE trip_id = $1
 ORDER BY paid_at, id;
 
 -- name: CreateSettlementPaid :one
-INSERT INTO settlements_paid (trip_id, from_member, to_member, amount_base)
-VALUES ($1, $2, $3, $4)
+INSERT INTO settlements_paid (trip_id, from_member, to_member, amount_base, created_by)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;

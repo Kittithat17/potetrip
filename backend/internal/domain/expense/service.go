@@ -33,7 +33,28 @@ const (
 
 var Categories = []string{"food", "transport", "lodging", "shopping", "activity", "other"}
 
-var ErrNotFound = apperr.NotFound("expense_not_found", "ไม่พบรายการนี้")
+var (
+	ErrNotFound   = apperr.NotFound("expense_not_found", "ไม่พบรายการนี้")
+	errNotAllowed = apperr.Forbidden("not_allowed", "แก้หรือลบได้เฉพาะคนที่บันทึก คนจ่าย หรือเจ้าของทริป")
+)
+
+// Actor is the member making a change, and whether they own the trip.
+type Actor struct {
+	MemberID uuid.UUID
+	IsOwner  bool
+}
+
+// CanEdit: the member who logged an expense, the one who paid it, and the
+// trip owner may change or delete it; everyone else sees it read-only.
+func (a Actor) CanEdit(e db.Expense) bool {
+	return a.IsOwner || a.MemberID == e.CreatedBy || a.MemberID == e.PaidBy
+}
+
+func logActivity(ctx context.Context, q *db.Queries, a Actor, action string, e db.Expense) error {
+	return q.CreateActivity(ctx, db.CreateActivityParams{
+		TripID: e.TripID, MemberID: &a.MemberID, Action: action, ExpenseID: &e.ID, Title: e.Title, AmountBase: e.AmountBase,
+	})
+}
 
 // Input is what a client sends to create or replace an expense.
 type Input struct {
@@ -130,7 +151,8 @@ type prepared struct {
 	items      []Item
 }
 
-func (s *Service) Create(ctx context.Context, trip db.Trip, createdBy uuid.UUID, in Input) (View, error) {
+func (s *Service) Create(ctx context.Context, trip db.Trip, actor Actor, in Input) (View, error) {
+	createdBy := actor.MemberID
 	p, err := s.prepare(ctx, trip, in)
 	if err != nil {
 		return View{}, err
@@ -174,12 +196,12 @@ func (s *Service) Create(ctx context.Context, trip db.Trip, createdBy uuid.UUID,
 			return err
 		}
 		out = toView(e, p.shares, p.items)
-		return nil
+		return logActivity(ctx, q, actor, "expense_created", e)
 	})
 	return out, err
 }
 
-func (s *Service) Update(ctx context.Context, trip db.Trip, id uuid.UUID, in Input) (View, error) {
+func (s *Service) Update(ctx context.Context, trip db.Trip, actor Actor, id uuid.UUID, in Input) (View, error) {
 	p, err := s.prepare(ctx, trip, in)
 	if err != nil {
 		return View{}, err
@@ -189,6 +211,16 @@ func (s *Service) Update(ctx context.Context, trip db.Trip, id uuid.UUID, in Inp
 		q := s.q.WithTx(tx)
 		if err := checkCurrency(ctx, q, trip.ID, trip.BaseCurrency); err != nil {
 			return err
+		}
+		old, err := q.GetExpense(ctx, db.GetExpenseParams{ID: id, TripID: trip.ID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !actor.CanEdit(old) {
+			return errNotAllowed
 		}
 		e, err := q.UpdateExpense(ctx, db.UpdateExpenseParams{
 			ID:         id,
@@ -222,20 +254,34 @@ func (s *Service) Update(ctx context.Context, trip db.Trip, id uuid.UUID, in Inp
 			return err
 		}
 		out = toView(e, p.shares, p.items)
-		return nil
+		return logActivity(ctx, q, actor, "expense_updated", e)
 	})
 	return out, err
 }
 
-func (s *Service) Delete(ctx context.Context, tripID, id uuid.UUID) error {
-	n, err := s.q.DeleteExpense(ctx, db.DeleteExpenseParams{ID: id, TripID: tripID})
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
+func (s *Service) Delete(ctx context.Context, tripID uuid.UUID, actor Actor, id uuid.UUID) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		e, err := q.GetExpense(ctx, db.GetExpenseParams{ID: id, TripID: tripID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !actor.CanEdit(e) {
+			return errNotAllowed
+		}
+		if _, err := q.DeleteExpense(ctx, db.DeleteExpenseParams{ID: id, TripID: tripID}); err != nil {
+			return err
+		}
+		return logActivity(ctx, q, actor, "expense_deleted", e)
+	})
+}
+
+// Activity is the trip's change history, newest first.
+func (s *Service) Activity(ctx context.Context, tripID uuid.UUID) ([]db.ListActivityRow, error) {
+	return s.q.ListActivity(ctx, tripID)
 }
 
 func (s *Service) Get(ctx context.Context, tripID, id uuid.UUID) (View, error) {

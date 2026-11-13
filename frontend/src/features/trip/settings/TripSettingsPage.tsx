@@ -1,6 +1,8 @@
 import { Crown, Lock } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { useBalances, useExpenses, useUpdateMe, useUpdateTrip } from '../../../api/hooks'
+import { useActivity, useBalances, useExpenses, useUpdateMe, useUpdateTrip } from '../../../api/hooks'
+import { formatShortDateTime } from '../../../lib/datetime'
+import { formatMoney } from '../../../lib/money'
 import { Avatar, Button, Card, ErrorText, Field, inputClass, Page, PageHeader, TextInput } from '../../../components/ui/ui'
 import { currencyName } from '../../../lib/currencyInfo'
 import { CURRENCIES } from '../../../lib/money'
@@ -131,7 +133,38 @@ export function TripSettingsPage() {
             ))}
           </ul>
         </Card>
+
+        <ActivityCard />
       </div>
     </Page>
+  )
+}
+
+/** Who added, edited or deleted what, so changes to the money are visible. */
+function ActivityCard() {
+  const { t, locale } = useI18n()
+  const { trip } = useTrip()
+  const q = useActivity(trip.id)
+  const rows = q.data ?? []
+  return (
+    <Card>
+      <h2 className="mb-1 font-bold">{t('activity.title')}</h2>
+      <p className="mb-2 text-xs text-slate-500">{t('activity.hint')}</p>
+      {rows.length === 0 ? (
+        <p className="text-sm text-slate-500">{t('activity.empty')}</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {rows.map((a) => (
+            <li key={a.id} className="py-2 text-sm">
+              <p>
+                <b>{a.member_name ?? '?'}</b> {t(`activity.${a.action}`)} <span className="font-medium">“{a.title}”</span>{' '}
+                <span className="tabular-nums text-slate-600">{formatMoney(a.amount_base, trip.base_currency)}</span>
+              </p>
+              <p className="text-xs text-slate-500">{formatShortDateTime(a.created_at, locale)}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   )
 }

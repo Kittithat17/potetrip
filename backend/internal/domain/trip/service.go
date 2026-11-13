@@ -29,8 +29,9 @@ import (
 const (
 	maxTripName   = 100
 	maxMemberName = 50
-	maxPending    = 20 // open join requests per trip, to blunt spam
-	maxClaims     = 50 // legacy device tokens one request may claim
+	maxPending    = 20  // open join requests per trip, to blunt spam
+	maxClaims     = 50  // legacy device tokens one request may claim
+	maxUserTrips  = 100 // trips (incl. requests) per account, to blunt spam
 	inviteLen     = 10
 	// No 0/O/1/I/L so codes are easy to read aloud and type.
 	inviteAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
@@ -46,6 +47,11 @@ var (
 	ErrDeviceNotFound  = apperr.Forbidden("not_a_member", "คุณยังไม่ได้เข้าร่วมทริปนี้")
 	ErrRequestNotFound = apperr.NotFound("request_not_found", "ไม่พบคำขอนี้ หรือมีการตัดสินใจไปแล้ว")
 	errNameTaken       = apperr.Conflict("member_name_taken", "มีคนชื่อนี้ในทริปแล้ว ถ้าเป็นคุณให้เลือกชื่อจากรายการ")
+	// Claiming an existing member is only for members nobody has signed in
+	// as yet (e.g. from before accounts existed). Otherwise anyone with the
+	// invite link could ask to become the owner or a friend.
+	errMemberLinked = apperr.Conflict("member_linked", "ชื่อนี้ผูกกับบัญชีของคนอื่นแล้ว ถ้าเป็นคุณ ให้เข้าสู่ระบบด้วยบัญชีเดิม")
+	errTooManyTrips = apperr.Conflict("too_many_trips", "บัญชีนี้มีทริปเยอะเกินไปแล้ว")
 )
 
 type Service struct {
@@ -80,6 +86,9 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, name, baseCurren
 	}
 	pp, err := normalizePromptPay(promptpay)
 	if err != nil {
+		return Created{}, err
+	}
+	if err := s.checkTripCap(ctx, userID); err != nil {
 		return Created{}, err
 	}
 	var out Created
@@ -194,6 +203,9 @@ func (s *Service) RequestJoin(ctx context.Context, userID, tripID uuid.UUID, nam
 		return db.Device{}, apperr.Conflict("already_requested", "ส่งคำขอไปแล้ว รอเจ้าของทริปอนุมัติ")
 	}
 
+	if err := s.checkTripCap(ctx, userID); err != nil {
+		return db.Device{}, err
+	}
 	members, err := s.q.ListMembers(ctx, tripID)
 	if err != nil {
 		return db.Device{}, err
@@ -203,6 +215,13 @@ func (s *Service) RequestJoin(ctx context.Context, userID, tripID uuid.UUID, nam
 		m, ok := findMember(members, *claim)
 		if !ok {
 			return db.Device{}, ErrMemberNotFound
+		}
+		linked, err := s.q.MemberLinked(ctx, &m.ID)
+		if err != nil {
+			return db.Device{}, err
+		}
+		if linked {
+			return db.Device{}, errMemberLinked
 		}
 		arg.RequestedMemberID, arg.RequestedName = &m.ID, m.Name
 	} else {
@@ -318,8 +337,31 @@ func (s *Service) UpdatePromptPay(ctx context.Context, tripID, memberID uuid.UUI
 	return m, err
 }
 
-func (s *Service) PendingRequests(ctx context.Context, tripID uuid.UUID) ([]db.Device, error) {
-	return s.q.ListPendingDevices(ctx, tripID)
+// PendingRequests lists open join requests with the account behind each.
+func (s *Service) PendingRequests(ctx context.Context, tripID uuid.UUID) ([]db.ListPendingWithAccountRow, error) {
+	return s.q.ListPendingWithAccount(ctx, tripID)
+}
+
+// RejectAll declines every open request (e.g. after a flood of fake ones).
+func (s *Service) RejectAll(ctx context.Context, tripID uuid.UUID) (int64, error) {
+	return s.q.RejectAllPending(ctx, tripID)
+}
+
+// PublicMembers is what invite-link holders see: names, and whether each
+// member is already tied to an account (and so can't be claimed).
+func (s *Service) PublicMembers(ctx context.Context, tripID uuid.UUID) ([]db.ListMembersWithLinkRow, error) {
+	return s.q.ListMembersWithLink(ctx, tripID)
+}
+
+func (s *Service) checkTripCap(ctx context.Context, userID uuid.UUID) error {
+	n, err := s.q.CountUserDevices(ctx, &userID)
+	if err != nil {
+		return err
+	}
+	if n >= maxUserTrips {
+		return errTooManyTrips
+	}
+	return nil
 }
 
 // Approve lets a pending device into the trip, creating its member first
@@ -336,6 +378,14 @@ func (s *Service) Approve(ctx context.Context, tripID, requestID uuid.UUID) (db.
 			return err
 		}
 		if d.RequestedMemberID != nil {
+			// Someone may have signed in as this member since the request.
+			linked, err := q.MemberLinked(ctx, d.RequestedMemberID)
+			if err != nil {
+				return err
+			}
+			if linked {
+				return errMemberLinked
+			}
 			out, err = q.GetMember(ctx, *d.RequestedMemberID)
 			if err != nil {
 				return err

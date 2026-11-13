@@ -48,7 +48,14 @@ func spa(dir string, secure bool) http.Handler {
 		}
 
 		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-		if st, err := fs.Stat(root, name); name == "" || err != nil || st.IsDir() {
+		st, err := fs.Stat(root, name)
+		if name != "" && err != nil && looksLikeFile(name) {
+			// /.env, /.git/config, /x.js.map ...: say "not found" rather than
+			// serving the app, so nobody mistakes it for a real file.
+			http.NotFound(w, r)
+			return
+		}
+		if name == "" || err != nil || st.IsDir() {
 			// A client-side route: always the latest app shell.
 			h.Set("Cache-Control", "no-cache")
 			r = r.Clone(r.Context())
@@ -64,4 +71,15 @@ func spa(dir string, secure bool) http.Handler {
 		}
 		files.ServeHTTP(w, r)
 	})
+}
+
+// looksLikeFile: a dot-file or a name with an extension. App routes
+// (/t/ABCDEFGH23/settle) have neither.
+func looksLikeFile(name string) bool {
+	for _, seg := range strings.Split(name, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	return path.Ext(name) != ""
 }

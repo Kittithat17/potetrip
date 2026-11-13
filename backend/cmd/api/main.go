@@ -95,6 +95,7 @@ func run() error {
 			FX:          rates,
 			CORSOrigins: cfg.CORSOrigins,
 			StaticDir:   cfg.StaticDir,
+			TrustProxy:  cfg.TrustProxy,
 		}).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

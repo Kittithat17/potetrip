@@ -8,7 +8,8 @@ export type Trip = {
 }
 
 /** What anyone with the invite code can see about a member. */
-export type PublicMember = { id: string; name: string }
+/** claimable: nobody signs in as this member yet, so a newcomer may say "that's me". */
+export type PublicMember = { id: string; name: string; claimable: boolean }
 
 export type JoinStatus = 'pending' | 'approved' | 'rejected'
 
@@ -18,6 +19,21 @@ export type JoinRequest = {
   requested_name: string
   requested_member_id: string | null // set when claiming an existing name
   created_at: string
+  /** The account asking (owner's list only), so the owner can check who it really is. */
+  account?: { name: string; email: string | null; has_google: boolean }
+}
+
+export type ActivityAction = 'expense_created' | 'expense_updated' | 'expense_deleted' | 'repayment_recorded'
+
+export type Activity = {
+  id: string
+  action: ActivityAction
+  expense_id: string | null
+  title: string
+  amount_base: number
+  created_at: string
+  member_id: string | null
+  member_name: string | null
 }
 
 export type Me = { status: JoinStatus; request: JoinRequest; member: Member | null; is_owner: boolean }

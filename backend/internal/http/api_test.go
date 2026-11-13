@@ -237,14 +237,24 @@ func TestJoinNeedsOwnerApproval(t *testing.T) {
 	if code := c.errCode("POST", base+"/join", map[string]any{"name": "ฝน2"}, 409); code != "already_requested" {
 		t.Fatal(code)
 	}
-	impostorToken, impostorReq := c.join(tr.ID, map[string]any{"member_id": owner.ID})
+	// Nobody can ask to "be" a member who already signs in (here: the owner).
+	if code := func() string {
+		c.me = c.login("impostor")
+		return c.errCode("POST", base+"/join", map[string]any{"member_id": owner.ID}, 409)
+	}(); code != "member_linked" {
+		t.Fatal(code)
+	}
+	impostorToken, impostorReq := c.join(tr.ID, map[string]any{"name": "แอบอ้าง"})
 
-	// Only the owner sees and decides requests.
+	// Only the owner sees and decides requests, with the account behind each.
 	c.me = ownerToken
 	var reqs []map[string]any
 	c.do("GET", base+"/join-requests", nil, 200, &reqs)
-	if len(reqs) != 2 || reqs[1]["requested_member_id"] != owner.ID {
+	if len(reqs) != 2 || reqs[1]["requested_name"] != "แอบอ้าง" {
 		t.Fatalf("requests %+v", reqs)
+	}
+	if acc, _ := reqs[1]["account"].(map[string]any); acc == nil || !strings.HasPrefix(acc["name"].(string), "joiner") || acc["email"] == nil {
+		t.Fatalf("request account %+v", reqs[1])
 	}
 	var fon memberResp
 	c.do("POST", base+"/join-requests/"+reqID+"/approve", nil, 200, &fon)

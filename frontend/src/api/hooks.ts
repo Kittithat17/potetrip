@@ -97,6 +97,15 @@ export function useDecideJoin(tripId: string) {
   })
 }
 
+export function useRejectAllJoins(tripId: string) {
+  const invalidate = useInvalidateTrip(tripId)
+  return useMutation({ mutationFn: () => api.rejectAllJoins(tripId), onSuccess: invalidate })
+}
+
+export function useActivity(tripId: string) {
+  return useQuery({ queryKey: [...keys.trip(tripId), 'activity'], queryFn: () => api.getActivity(tripId), refetchInterval: POLL })
+}
+
 export function useExpenses(tripId: string) {
   return useQuery({ queryKey: keys.expenses(tripId), queryFn: () => api.listExpenses(tripId), refetchInterval: POLL })
 }

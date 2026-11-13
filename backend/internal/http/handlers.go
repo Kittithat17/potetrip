@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/raisin/travel-split/backend/internal/domain/expense"
+	"github.com/raisin/travel-split/backend/internal/domain/settlement"
 	"github.com/raisin/travel-split/backend/internal/domain/trip"
 	"github.com/raisin/travel-split/backend/internal/platform/apperr"
 	"github.com/raisin/travel-split/backend/internal/platform/db"
@@ -42,8 +44,9 @@ func (s *Server) createTrip(w http.ResponseWriter, r *http.Request) {
 // publicMember is what anyone with the invite code sees: enough to say
 // "that's me" when joining, nothing more (no PromptPay numbers).
 type publicMember struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Claimable bool      `json:"claimable"` // false once someone has signed in as them
 }
 
 func (s *Server) getTripByInvite(w http.ResponseWriter, r *http.Request) {
@@ -52,14 +55,14 @@ func (s *Server) getTripByInvite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	ms, err := s.Trips.ListMembers(r.Context(), t.ID)
+	ms, err := s.Trips.PublicMembers(r.Context(), t.ID)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
 	names := make([]publicMember, len(ms))
 	for i, m := range ms {
-		names[i] = publicMember{ID: m.ID, Name: m.Name}
+		names[i] = publicMember{ID: m.ID, Name: m.Name, Claimable: !m.Linked}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trip": t, "members": names})
 }
@@ -144,6 +147,14 @@ type joinRequest struct {
 	RequestedName     string     `json:"requested_name"`
 	RequestedMemberID *uuid.UUID `json:"requested_member_id"` // set when claiming an existing name
 	CreatedAt         time.Time  `json:"created_at"`
+	// Who is asking (owner-only list): lets the owner check it's really their friend.
+	Account *requestAccount `json:"account,omitempty"`
+}
+
+type requestAccount struct {
+	Name      string  `json:"name"`
+	Email     *string `json:"email"` // nil for a passkey-only account
+	HasGoogle bool    `json:"has_google"`
 }
 
 func requestView(d db.Device) joinRequest {
@@ -158,9 +169,21 @@ func (s *Server) listJoinRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]joinRequest, len(ds))
 	for i, d := range ds {
-		out[i] = requestView(d)
+		out[i] = requestView(d.Device)
+		if d.AccountName != nil {
+			out[i].Account = &requestAccount{Name: *d.AccountName, Email: d.AccountEmail, HasGoogle: d.AccountHasGoogle}
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) rejectAllJoins(w http.ResponseWriter, r *http.Request) {
+	n, err := s.Trips.RejectAll(r.Context(), tripFrom(r.Context()).ID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"rejected": n})
 }
 
 func (s *Server) approveJoin(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +243,7 @@ func (s *Server) createExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	e, err := s.Expenses.Create(ctx, tripFrom(ctx), memberFrom(ctx).ID, in)
+	e, err := s.Expenses.Create(ctx, tripFrom(ctx), expenseActor(ctx), in)
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -251,7 +274,7 @@ func (s *Server) updateExpense(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	e, err := s.Expenses.Update(r.Context(), tripFrom(r.Context()), id, in)
+	e, err := s.Expenses.Update(r.Context(), tripFrom(r.Context()), expenseActor(r.Context()), id, in)
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -264,11 +287,30 @@ func (s *Server) deleteExpense(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.Expenses.Delete(r.Context(), tripFrom(r.Context()).ID, id); err != nil {
+	if err := s.Expenses.Delete(r.Context(), tripFrom(r.Context()).ID, expenseActor(r.Context()), id); err != nil {
 		writeErr(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func isOwner(ctx context.Context) bool {
+	t := tripFrom(ctx)
+	return t.OwnerMemberID != nil && *t.OwnerMemberID == memberFrom(ctx).ID
+}
+
+func expenseActor(ctx context.Context) expense.Actor {
+	return expense.Actor{MemberID: memberFrom(ctx).ID, IsOwner: isOwner(ctx)}
+}
+
+// activity is the trip's change history (who added, edited, deleted what).
+func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.Expenses.Activity(r.Context(), tripFrom(r.Context()).ID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 func expenseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
@@ -312,7 +354,8 @@ func (s *Server) markPaid(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	p, err := s.Settlements.MarkPaid(r.Context(), tripFrom(r.Context()).ID, req.From, req.To, req.AmountBase)
+	ctx := r.Context()
+	p, err := s.Settlements.MarkPaid(ctx, tripFrom(ctx).ID, settlement.Actor{MemberID: memberFrom(ctx).ID, IsOwner: isOwner(ctx)}, req.From, req.To, req.AmountBase)
 	if err != nil {
 		writeErr(w, r, err)
 		return

@@ -143,6 +143,7 @@ export const en = {
     quick: 'Quick reference',
   },
   trip: {
+    shareVia: 'Share via…',
     notFound: 'Trip not found. Check the invite link.',
     hello: 'Hi {name}',
     leaveTitle: 'Leave this trip?',
@@ -199,6 +200,12 @@ export const en = {
     cancel: 'Cancel request',
   },
   requests: {
+    account: 'Account',
+    passkeyOnly: 'passkey account, no email',
+    claimWarning: 'Says they are "{name}". Approve only if this account really belongs to them.',
+    rejectAll: 'Decline all requests',
+    rejectAllTitle: 'Decline all {n} requests?',
+    rejectAllHint: 'They can ask again later. Use this if strangers got hold of the invite link.',
     title: 'Join requests ({n})',
     claims: '⚠️ Says they are this member on a new device. Make sure before approving.',
     newMember: 'Wants to join as a new member',
@@ -206,6 +213,7 @@ export const en = {
     reject: 'Decline {name}',
   },
   expense: {
+    readOnly: 'Only the person who logged this, the person who paid, or the trip owner can change it.',
     add: 'Add expense',
     edit: 'Edit expense',
     title: 'Description',
@@ -346,7 +354,20 @@ export const en = {
     itemsOne: '1 expense',
   },
   // Keyed by the API's error.code so messages follow the chosen language.
+  activity: {
+    title: 'Change history',
+    hint: 'Every expense added, edited or deleted, and every repayment recorded.',
+    empty: 'Nothing yet',
+    expense_created: 'added',
+    expense_updated: 'edited',
+    expense_deleted: 'deleted',
+    repayment_recorded: 'recorded a repayment',
+  },
   errors: {
+    rate_limited: 'Too many requests. Wait a moment and try again.',
+    not_allowed: "You can't change this. Ask the person who logged it, the payer, or the trip owner.",
+    member_linked: 'That name already belongs to an account. If it is you, sign in with that account.',
+    too_many_trips: 'This account has too many trips',
     passkey_expired: 'That took too long. Please try again.',
     passkey_failed: "Couldn't verify the passkey. Please try again.",
     passkey_unknown: "This passkey isn't registered here. It may have been removed; sign in another way.",

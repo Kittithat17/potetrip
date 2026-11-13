@@ -100,12 +100,13 @@ type Session struct {
 }
 
 type SettlementsPaid struct {
-	ID         uuid.UUID `json:"id"`
-	TripID     uuid.UUID `json:"trip_id"`
-	FromMember uuid.UUID `json:"from_member"`
-	ToMember   uuid.UUID `json:"to_member"`
-	AmountBase int64     `json:"amount_base"`
-	PaidAt     time.Time `json:"paid_at"`
+	ID         uuid.UUID  `json:"id"`
+	TripID     uuid.UUID  `json:"trip_id"`
+	FromMember uuid.UUID  `json:"from_member"`
+	ToMember   uuid.UUID  `json:"to_member"`
+	AmountBase int64      `json:"amount_base"`
+	PaidAt     time.Time  `json:"paid_at"`
+	CreatedBy  *uuid.UUID `json:"created_by"`
 }
 
 type Slip struct {
@@ -125,6 +126,17 @@ type Trip struct {
 	InviteCode    string     `json:"invite_code"`
 	CreatedAt     time.Time  `json:"created_at"`
 	OwnerMemberID *uuid.UUID `json:"owner_member_id"`
+}
+
+type TripActivity struct {
+	ID         uuid.UUID  `json:"id"`
+	TripID     uuid.UUID  `json:"trip_id"`
+	MemberID   *uuid.UUID `json:"member_id"`
+	Action     string     `json:"action"`
+	ExpenseID  *uuid.UUID `json:"expense_id"`
+	Title      string     `json:"title"`
+	AmountBase int64      `json:"amount_base"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type User struct {

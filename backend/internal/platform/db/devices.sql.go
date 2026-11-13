@@ -84,6 +84,17 @@ func (q *Queries) CountPendingDevices(ctx context.Context, tripID uuid.UUID) (in
 	return count, err
 }
 
+const countUserDevices = `-- name: CountUserDevices :one
+SELECT count(*) FROM devices WHERE user_id = $1
+`
+
+func (q *Queries) CountUserDevices(ctx context.Context, userID *uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserDevices, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createDevice = `-- name: CreateDevice :one
 INSERT INTO devices (trip_id, user_id, status, member_id, requested_name, requested_member_id, promptpay)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -247,6 +258,72 @@ func (q *Queries) ListPendingDevices(ctx context.Context, tripID uuid.UUID) ([]D
 		return nil, err
 	}
 	return items, nil
+}
+
+const listPendingWithAccount = `-- name: ListPendingWithAccount :many
+SELECT d.id, d.trip_id, d.token_hash, d.status, d.member_id, d.requested_name, d.requested_member_id, d.promptpay, d.created_at, d.decided_at, d.user_id, u.email AS account_email, u.name AS account_name,
+       (u.google_sub IS NOT NULL)::bool AS account_has_google
+FROM devices d
+LEFT JOIN users u ON u.id = d.user_id
+WHERE d.trip_id = $1 AND d.status = 'pending'
+ORDER BY d.created_at
+`
+
+type ListPendingWithAccountRow struct {
+	Device           Device  `json:"device"`
+	AccountEmail     *string `json:"account_email"`
+	AccountName      *string `json:"account_name"`
+	AccountHasGoogle bool    `json:"account_has_google"`
+}
+
+// Join requests with the account that made them, so the owner can tell a
+// real friend from someone who only has the invite link.
+func (q *Queries) ListPendingWithAccount(ctx context.Context, tripID uuid.UUID) ([]ListPendingWithAccountRow, error) {
+	rows, err := q.db.Query(ctx, listPendingWithAccount, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingWithAccountRow{}
+	for rows.Next() {
+		var i ListPendingWithAccountRow
+		if err := rows.Scan(
+			&i.Device.ID,
+			&i.Device.TripID,
+			&i.Device.TokenHash,
+			&i.Device.Status,
+			&i.Device.MemberID,
+			&i.Device.RequestedName,
+			&i.Device.RequestedMemberID,
+			&i.Device.Promptpay,
+			&i.Device.CreatedAt,
+			&i.Device.DecidedAt,
+			&i.Device.UserID,
+			&i.AccountEmail,
+			&i.AccountName,
+			&i.AccountHasGoogle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const rejectAllPending = `-- name: RejectAllPending :execrows
+UPDATE devices SET status = 'rejected', decided_at = now()
+WHERE trip_id = $1 AND status = 'pending'
+`
+
+func (q *Queries) RejectAllPending(ctx context.Context, tripID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, rejectAllPending, tripID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const rejectDevice = `-- name: RejectDevice :one

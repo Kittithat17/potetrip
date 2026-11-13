@@ -1,5 +1,5 @@
 import { API_BASE_URL, apiFetch } from './client'
-import type { AuthConfig, Balance, Expense, ExpenseInput, JoinRequest, Me, Member, MyTrip, Passkey, PublicMember, SlipOutcome, Summary, Transfer, Trip, User } from './types'
+import type { Activity, AuthConfig, Balance, Expense, ExpenseInput, JoinRequest, Me, Member, MyTrip, Passkey, PublicMember, SlipOutcome, Summary, Transfer, Trip, User } from './types'
 
 export const createTrip = (body: { name: string; base_currency: string; creator_name?: string }) =>
   apiFetch<{ trip: Trip; member: Member }>('/trips', { method: 'POST', body })
@@ -54,6 +54,11 @@ export const listJoinRequests = (tripId: string) =>
 
 export const decideJoin = (tripId: string, requestId: string, decision: 'approve' | 'reject') =>
   apiFetch<unknown>(`/trips/${tripId}/join-requests/${requestId}/${decision}`, { method: 'POST' })
+
+export const rejectAllJoins = (tripId: string) =>
+  apiFetch<{ rejected: number }>(`/trips/${tripId}/join-requests/reject-all`, { method: 'POST' })
+
+export const getActivity = (tripId: string) => apiFetch<Activity[]>(`/trips/${tripId}/activity`)
 
 export const listExpenses = (tripId: string) =>
   apiFetch<Expense[]>(`/trips/${tripId}/expenses`)

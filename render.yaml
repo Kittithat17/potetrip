@@ -29,6 +29,9 @@ services:
         sync: false
       - key: SLIP_CONCURRENCY
         value: "3"
+      # Render's edge is Cloudflare: rate limits key on CF-Connecting-IP.
+      - key: TRUST_PROXY
+        value: "true"
       # Apply pending DB migrations on start. Off by default: turn it on for
       # the deploy that should migrate, then off again.
       - key: MIGRATE_ON_START

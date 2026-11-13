@@ -9,7 +9,6 @@ import { JoinRequestsCard } from '../join/JoinRequestsCard'
 import { AppFrame, BlueHeader, IconAction, Sheet } from '../../../components/ui/shell'
 import { ErrorText, Spinner } from '../../../components/ui/ui'
 import { CATEGORIES } from '../expenses/categories'
-import { inviteLink } from '../../../lib/invite'
 import { formatMoney } from '../../../lib/money'
 import { useTrip } from '../layout/context'
 import { useI18n } from '../../../i18n/context'
@@ -37,19 +36,8 @@ export function DashboardPage() {
       (!onlyMine || e.paid_by === me.id || e.shares.some((s) => s.member_id === me.id)),
   )
 
-  const share = async () => {
-    const url = inviteLink(trip.invite_code)
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: trip.name, text: t('trip.shareText', { name: trip.name }), url })
-      } catch {
-        /* user closed the share sheet */
-      }
-      return
-    }
-    // No share sheet (desktop, or plain http): show our own invite dialog.
-    setInviteOpen(true)
-  }
+  // Our invite sheet (link, code, copy); it offers the system share sheet too.
+  const share = () => setInviteOpen(true)
 
   const onLeave = async () => {
     const ok = await confirm({

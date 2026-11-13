@@ -35,6 +35,9 @@ type Config struct {
 	StaticDir string
 	// MigrateOnStart applies pending DB migrations before serving.
 	MigrateOnStart bool
+	// TrustProxy: the app sits behind Cloudflare (Render), so the client IP
+	// comes from CF-Connecting-IP.
+	TrustProxy bool
 }
 
 func Load() (Config, error) {
@@ -80,7 +83,8 @@ func Load() (Config, error) {
 		return cfg, fmt.Errorf("unknown AUTH_PROVIDER %q (google | mock)", cfg.AuthProvider)
 	}
 
-	for _, o := range strings.Split(getenv("CORS_ORIGINS", "http://localhost:5173"), ",") {
+	cfg.TrustProxy = env("TRUST_PROXY") == "true"
+	for _, o := range strings.Split(env("CORS_ORIGINS"), ",") {
 		if o = strings.TrimSpace(o); o != "" {
 			cfg.CORSOrigins = append(cfg.CORSOrigins, o)
 		}

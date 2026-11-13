@@ -41,3 +41,20 @@ UPDATE trips SET owner_member_id = $2 WHERE id = $1;
 
 -- name: DeleteDeviceForUser :exec
 DELETE FROM devices WHERE trip_id = $1 AND user_id = $2;
+
+-- name: ListPendingWithAccount :many
+-- Join requests with the account that made them, so the owner can tell a
+-- real friend from someone who only has the invite link.
+SELECT sqlc.embed(d), u.email AS account_email, u.name AS account_name,
+       (u.google_sub IS NOT NULL)::bool AS account_has_google
+FROM devices d
+LEFT JOIN users u ON u.id = d.user_id
+WHERE d.trip_id = $1 AND d.status = 'pending'
+ORDER BY d.created_at;
+
+-- name: RejectAllPending :execrows
+UPDATE devices SET status = 'rejected', decided_at = now()
+WHERE trip_id = $1 AND status = 'pending';
+
+-- name: CountUserDevices :one
+SELECT count(*) FROM devices WHERE user_id = $1;

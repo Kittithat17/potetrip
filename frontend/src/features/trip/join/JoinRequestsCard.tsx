@@ -1,5 +1,6 @@
-import { Check, UserPlus, X } from 'lucide-react'
-import { useDecideJoin, useJoinRequests } from '../../../api/hooks'
+import { Check, ShieldAlert, UserPlus, X } from 'lucide-react'
+import { useDecideJoin, useJoinRequests, useRejectAllJoins } from '../../../api/hooks'
+import { useConfirm } from '../../../components/feedback/confirm'
 import { Avatar, ErrorText } from '../../../components/ui/ui'
 import { useI18n } from '../../../i18n/context'
 import { useTrip } from '../layout/context'
@@ -10,7 +11,13 @@ export function JoinRequestsCard() {
   const { trip } = useTrip()
   const q = useJoinRequests(trip.id, true)
   const decide = useDecideJoin(trip.id)
+  const rejectAll = useRejectAllJoins(trip.id)
+  const confirm = useConfirm()
   const requests = q.data ?? []
+  const onRejectAll = async () => {
+    const ok = await confirm({ title: t('requests.rejectAllTitle', { n: requests.length }), message: t('requests.rejectAllHint'), confirmLabel: t('requests.rejectAll') })
+    if (ok) rejectAll.mutate()
+  }
   if (requests.length === 0) return null
 
   return (
@@ -20,11 +27,19 @@ export function JoinRequestsCard() {
       </h2>
       <ul className="space-y-2">
         {requests.map((r) => (
-          <li key={r.id} className="flex items-center gap-3 rounded-2xl bg-white p-3">
+          <li key={r.id} className="rounded-2xl bg-white p-3">
+            <div className="flex items-center gap-3">
             <Avatar name={r.requested_name} size="sm" />
             <div className="min-w-0 flex-1">
               <p className="truncate font-medium">{r.requested_name}</p>
               <p className="text-xs text-slate-500">{r.requested_member_id ? t('requests.claims') : t('requests.newMember')}</p>
+              {r.account && (
+                <p className="text-xs break-words text-slate-600">
+                  {t('requests.account')}: <b>{r.account.name}</b>
+                  <br />
+                  <span className="break-all">{r.account.email ?? t('requests.passkeyOnly')}</span>
+                </p>
+              )}
             </div>
             <button
               onClick={() => decide.mutate({ id: r.id, decision: 'reject' })}
@@ -42,10 +57,22 @@ export function JoinRequestsCard() {
             >
               <Check className="size-5" />
             </button>
+            </div>
+            {r.requested_member_id && (
+              <p className="mt-2 flex gap-1.5 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+                <ShieldAlert className="size-4 shrink-0" />
+                {t('requests.claimWarning', { name: r.requested_name })}
+              </p>
+            )}
           </li>
         ))}
       </ul>
-      <ErrorText error={decide.error} />
+      {requests.length > 1 && (
+        <button onClick={onRejectAll} disabled={rejectAll.isPending} className="mt-3 text-sm font-medium text-red-700">
+          {t('requests.rejectAll')}
+        </button>
+      )}
+      <ErrorText error={decide.error ?? rejectAll.error} />
     </section>
   )
 }

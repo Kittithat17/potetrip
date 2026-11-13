@@ -68,9 +68,11 @@ let nextKey = 1
 export function ExpenseForm({ existing, draft, slipId, heading, top, extraActions, onSaved }: FormProps) {
   const { t, locale } = useI18n()
   const confirm = useConfirm()
-  const { trip, me, members, base } = useTrip()
+  const { trip, me, isOwner, members, base } = useTrip()
   const navigate = useNavigate()
   const baseCur = trip.base_currency
+  // Same rule as the server: who logged it, who paid it, or the trip owner.
+  const readOnly = !!existing && !isOwner && me.id !== existing.created_by && me.id !== existing.paid_by
   const save = useSaveExpense(trip.id, existing?.id)
   const del = useDeleteExpense(trip.id)
 
@@ -218,6 +220,8 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
       <PageHeader title={heading ?? (existing ? t('expense.edit') : t('expense.add'))} back={base} />
       {top}
       <form onSubmit={onSubmit} className="space-y-4">
+        {readOnly && <p className="rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-600">{t('expense.readOnly')}</p>}
+        <fieldset disabled={readOnly} className="min-w-0 space-y-4">
         <Field label={t('expense.title')}>
           <TextInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('expense.titlePlaceholder')} required maxLength={200} />
         </Field>
@@ -424,13 +428,17 @@ export function ExpenseForm({ existing, draft, slipId, heading, top, extraAction
           )}
         </fieldset>
 
+        </fieldset>
+
         <ErrorText error={formError || save.error || del.error} />
 
         <div className="space-y-2 pt-2">
+          {!readOnly && (
           <Button type="submit" className="w-full" disabled={save.isPending}>
             {save.isPending ? t('common.saving') : t('common.save')}
           </Button>
-          {existing && (
+          )}
+          {existing && !readOnly && (
             <Button type="button" variant="danger" className="w-full" onClick={onDelete} disabled={del.isPending}>
               {t('expense.delete')}
             </Button>

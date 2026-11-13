@@ -54,12 +54,12 @@ export function JoinPage({ trip, members, onRequested }: JoinProps) {
           </form>
         </Sheet>
 
-        {members.length > 0 && (
+        {members.some((m) => m.claimable) && (
           <Sheet>
             <h2 className="font-bold">{t('join.alreadyIn')}</h2>
             <p className="mb-2 text-sm text-slate-500">{t('join.alreadyInHint')}</p>
             <ul className="divide-y divide-slate-100">
-              {members.map((m) => (
+              {members.filter((m) => m.claimable).map((m) => (
                 <li key={m.id}>
                   <button
                     onClick={() => join.mutate({ member_id: m.id })}
