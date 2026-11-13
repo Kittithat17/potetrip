@@ -111,10 +111,19 @@ func TestEditRightsAndHistory(t *testing.T) {
 	}
 	c.do("POST", base+"/settlements/paid", map[string]any{"from": mint.ID, "to": fon.ID, "amount_base": 10000}, 201, nil)
 
-	// The creator may edit; the owner may delete.
+	// Only the creator may edit or delete: not the trip owner, not the payer.
 	c.me = fonSession
-	c.do("PUT", base+"/expenses/"+e.ID, map[string]any{"title": "ข้าวมันไก่", "category": "food", "paid_by": fon.ID, "amount": 30000, "split_type": "equal", "member_ids": all}, 200, nil)
-	c.me = ownerSession
+	c.do("PUT", base+"/expenses/"+e.ID, map[string]any{"title": "ข้าวมันไก่", "category": "food", "paid_by": mint.ID, "amount": 30000, "split_type": "equal", "member_ids": all}, 200, nil)
+	for _, who := range []string{ownerSession, mintSession} { // owner; mint now paid it
+		c.me = who
+		if code := c.errCode("PUT", base+"/expenses/"+e.ID, edit, 403); code != "not_allowed" {
+			t.Fatal(code)
+		}
+		if code := c.errCode("DELETE", base+"/expenses/"+e.ID, nil, 403); code != "not_allowed" {
+			t.Fatal(code)
+		}
+	}
+	c.me = fonSession
 	c.do("DELETE", base+"/expenses/"+e.ID, nil, 204, nil)
 
 	var log []struct {
@@ -128,7 +137,7 @@ func TestEditRightsAndHistory(t *testing.T) {
 	for _, a := range log {
 		got = append(got, a.Action+":"+a.MemberName+":"+a.Title)
 	}
-	want := []string{"expense_deleted:แบงก์:ข้าวมันไก่", "expense_updated:ฝน:ข้าวมันไก่", "repayment_recorded:มิ้นท์:มิ้นท์ → ฝน", "expense_created:ฝน:ข้าว"}
+	want := []string{"expense_deleted:ฝน:ข้าวมันไก่", "expense_updated:ฝน:ข้าวมันไก่", "repayment_recorded:มิ้นท์:มิ้นท์ → ฝน", "expense_created:ฝน:ข้าว"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("history\n got %v\nwant %v", got, want)
 	}

@@ -300,7 +300,7 @@ func isOwner(ctx context.Context) bool {
 }
 
 func expenseActor(ctx context.Context) expense.Actor {
-	return expense.Actor{MemberID: memberFrom(ctx).ID, IsOwner: isOwner(ctx)}
+	return expense.Actor{MemberID: memberFrom(ctx).ID}
 }
 
 // activity is the trip's change history (who added, edited, deleted what).

@@ -38,16 +38,15 @@ var (
 	errNotAllowed = apperr.Forbidden("not_allowed", "แก้หรือลบได้เฉพาะคนที่บันทึก คนจ่าย หรือเจ้าของทริป")
 )
 
-// Actor is the member making a change, and whether they own the trip.
+// Actor is the member making a change.
 type Actor struct {
 	MemberID uuid.UUID
-	IsOwner  bool
 }
 
-// CanEdit: the member who logged an expense, the one who paid it, and the
-// trip owner may change or delete it; everyone else sees it read-only.
+// CanEdit: only the member who logged an expense may change or delete it;
+// everyone else, the payer and trip owner included, sees it read-only.
 func (a Actor) CanEdit(e db.Expense) bool {
-	return a.IsOwner || a.MemberID == e.CreatedBy || a.MemberID == e.PaidBy
+	return a.MemberID == e.CreatedBy
 }
 
 func logActivity(ctx context.Context, q *db.Queries, a Actor, action string, e db.Expense) error {

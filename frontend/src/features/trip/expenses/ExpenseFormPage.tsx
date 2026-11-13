@@ -68,11 +68,11 @@ let nextKey = 1
 export function ExpenseForm({ existing, draft, slipId, heading, top, extraActions, onSaved }: FormProps) {
   const { t, locale } = useI18n()
   const confirm = useConfirm()
-  const { trip, me, isOwner, members, base } = useTrip()
+  const { trip, me, members, base } = useTrip()
   const navigate = useNavigate()
   const baseCur = trip.base_currency
   // Same rule as the server: who logged it, who paid it, or the trip owner.
-  const readOnly = !!existing && !isOwner && me.id !== existing.created_by && me.id !== existing.paid_by
+  const readOnly = !!existing && me.id !== existing.created_by
   const save = useSaveExpense(trip.id, existing?.id)
   const del = useDeleteExpense(trip.id)
 

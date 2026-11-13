@@ -213,7 +213,7 @@ export const en = {
     reject: 'Decline {name}',
   },
   expense: {
-    readOnly: 'Only the person who logged this, the person who paid, or the trip owner can change it.',
+    readOnly: 'Only the person who logged this can change or delete it.',
     add: 'Add expense',
     edit: 'Edit expense',
     title: 'Description',
