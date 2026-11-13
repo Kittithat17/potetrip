@@ -22,6 +22,19 @@ export type JoinRequest = {
 
 export type Me = { status: JoinStatus; request: JoinRequest; member: Member | null; is_owner: boolean }
 
+export type User = { id: string; email: string; name: string; picture: string | null }
+
+/** A trip the signed-in user is in (or waiting to join). */
+export type MyTrip = {
+  id: string
+  name: string
+  invite_code: string
+  base_currency: string
+  status: JoinStatus
+  member_name: string | null
+  is_owner: boolean
+}
+
 export type Member = {
   id: string
   trip_id: string
@@ -34,6 +47,9 @@ export type Category = 'food' | 'transport' | 'lodging' | 'shopping' | 'activity
 export type SplitType = 'equal' | 'exact' | 'items'
 
 export type Share = { member_id: string; amount_base: number }
+
+/** A receipt line for split_type=items; amount is in the expense currency. */
+export type ExpenseItem = { name: string; amount: number; member_ids: string[] }
 
 export type Expense = {
   id: string
@@ -51,6 +67,7 @@ export type Expense = {
   created_by: string
   created_at: string
   shares: Share[]
+  items: ExpenseItem[]
 }
 
 export type ExpenseInput = {
@@ -63,7 +80,18 @@ export type ExpenseInput = {
   spent_at?: string
   member_ids?: string[]
   shares?: { member_id: string; amount: number }[]
+  items?: ExpenseItem[]
   slip_id?: string
+  fx_rate?: string // own rate (base per 1 currency); omitted = reference rate for the day
+}
+
+export type Summary = {
+  currency: string
+  total: number
+  count: number
+  by_category: { category: Category; amount_base: number; count: number }[]
+  by_currency: { currency: string; amount: number; amount_base: number; count: number }[]
+  by_member: { member_id: string; paid: number; consumed: number }[]
 }
 
 export type Balance = {
@@ -99,6 +127,7 @@ export type SlipSuggestion = {
   spent_at: string | null
   category: Category
   low_confidence: boolean
+  items: { name: string; amount: number }[]
 }
 
 export type SlipOutcome = {

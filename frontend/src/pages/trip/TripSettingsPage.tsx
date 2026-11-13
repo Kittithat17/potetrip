@@ -1,6 +1,6 @@
 import { Crown, Lock } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { useBalances, useExpenses, useUpdateTrip } from '../../api/hooks'
+import { useBalances, useExpenses, useUpdateMe, useUpdateTrip } from '../../api/hooks'
 import { Avatar, Button, Card, ErrorText, Field, inputClass, Page, PageHeader, TextInput } from '../../components/ui'
 import { currencyName } from '../../lib/currencyInfo'
 import { CURRENCIES } from '../../lib/money'
@@ -9,14 +9,22 @@ import { useI18n } from '../../i18n/context'
 
 export function TripSettingsPage() {
   const { t, locale } = useI18n()
-  const { trip, token, isOwner, members, base, nav } = useTrip()
-  const expensesQ = useExpenses(trip.id, token)
-  const balancesQ = useBalances(trip.id, token)
-  const update = useUpdateTrip(trip.id, token, trip.invite_code)
+  const { trip, me, isOwner, members, base, nav } = useTrip()
+  const expensesQ = useExpenses(trip.id)
+  const balancesQ = useBalances(trip.id)
+  const update = useUpdateTrip(trip.id, trip.invite_code)
 
   const [name, setName] = useState(trip.name)
   const [currency, setCurrency] = useState(trip.base_currency)
   const [saved, setSaved] = useState(false)
+  const updateMe = useUpdateMe(trip.id)
+  const [promptpay, setPromptpay] = useState(me.promptpay ?? '')
+  const [ppSaved, setPpSaved] = useState(false)
+  const onSavePromptPay = (e: FormEvent) => {
+    e.preventDefault()
+    setPpSaved(false)
+    updateMe.mutate(promptpay.trim() || null, { onSuccess: () => setPpSaved(true) })
+  }
 
   // Mirrors the server rule: the currency locks once money has been recorded.
   const hasActivity =
@@ -84,6 +92,21 @@ export function TripSettingsPage() {
               <p className="pt-2 text-xs text-slate-500">{t('tripSettings.ownerOnly')}</p>
             </dl>
           )}
+        </Card>
+
+        <Card>
+          <form onSubmit={onSavePromptPay} className="space-y-3">
+            <Field label={t('tripSettings.myPromptPay')} hint={t('tripSettings.myPromptPayHint')}>
+              <TextInput value={promptpay} onChange={(e) => setPromptpay(e.target.value)} inputMode="numeric" placeholder="08x-xxx-xxxx" maxLength={20} />
+            </Field>
+            <ErrorText error={updateMe.error} />
+            {ppSaved && promptpay.replace(/\D/g, '') === (me.promptpay ?? '') && (
+              <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{t('tripSettings.saved')}</p>
+            )}
+            <Button type="submit" variant="secondary" className="w-full" disabled={updateMe.isPending || promptpay.replace(/\D/g, '') === (me.promptpay ?? '')}>
+              {updateMe.isPending ? t('common.saving') : t('common.save')}
+            </Button>
+          </form>
         </Card>
 
         <Card>

@@ -10,11 +10,8 @@ import (
 	"testing"
 
 	"github.com/raisin/travel-split/backend/internal/db"
-	"github.com/raisin/travel-split/backend/internal/expense"
-	"github.com/raisin/travel-split/backend/internal/settlement"
 	"github.com/raisin/travel-split/backend/internal/slip"
 	"github.com/raisin/travel-split/backend/internal/testdb"
-	"github.com/raisin/travel-split/backend/internal/trip"
 )
 
 type stubReader struct{}
@@ -44,10 +41,9 @@ func multipartBody(t *testing.T, files map[string][]byte) (*bytes.Buffer, string
 
 func TestSlipUploadAndConfirm(t *testing.T) {
 	pool := testdb.New(t)
-	h := NewServer(Deps{
-		DB: pool, Trips: trip.NewService(pool), Expenses: expense.NewService(pool),
-		Settlements: settlement.NewService(pool), Slips: slip.NewService(stubReader{}, db.New(pool), 2),
-	}).Routes()
+	d := testDeps(pool)
+	d.Slips = slip.NewService(stubReader{}, db.New(pool), 2)
+	h := NewServer(d).Routes()
 	c := &apiClient{t: t, h: h}
 
 	tr, me, myToken := c.newTrip("สลิป", "แบงก์")
@@ -57,7 +53,7 @@ func TestSlipUploadAndConfirm(t *testing.T) {
 		body, ct := multipartBody(t, files)
 		req := httptest.NewRequest("POST", "/api/v1/trips/"+tripID+"/slips", body)
 		req.Header.Set("Content-Type", ct)
-		req.Header.Set(TokenHeader, token)
+		c.authorize(req, token)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code != want {
@@ -122,14 +118,14 @@ func TestSlipUploadAndConfirm(t *testing.T) {
 
 func TestSlipUploadDisabled(t *testing.T) {
 	pool := testdb.New(t)
-	h := NewServer(Deps{DB: pool, Trips: trip.NewService(pool), Expenses: expense.NewService(pool), Settlements: settlement.NewService(pool)}).Routes()
+	h := NewServer(testDeps(pool)).Routes()
 	c := &apiClient{t: t, h: h}
 	tr, _, token := c.newTrip("x", "a")
 
 	body, ct := multipartBody(t, map[string][]byte{"a.png": pngHeader})
 	req := httptest.NewRequest("POST", "/api/v1/trips/"+tr.ID+"/slips", body)
 	req.Header.Set("Content-Type", ct)
-	req.Header.Set(TokenHeader, token)
+	c.authorize(req, token)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {

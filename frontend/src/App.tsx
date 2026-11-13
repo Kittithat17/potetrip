@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Route, Routes } from 'react-router'
 import { retryUnlessClientError } from './api/hooks'
+import { AuthGate } from './auth/AuthGate'
 import { ConvertPage } from './pages/ConvertPage'
 import { HomePage } from './pages/HomePage'
 import { MyTripsPage } from './pages/MyTripsPage'
@@ -9,6 +10,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { DashboardPage } from './pages/trip/DashboardPage'
 import { ExpenseFormPage } from './pages/trip/ExpenseFormPage'
 import { ScanPage } from './pages/trip/ScanPage'
+import { SummaryPage } from './pages/trip/SummaryPage'
 import { SettlePage } from './pages/trip/SettlePage'
 import { TripConvertPage } from './pages/trip/TripConvertPage'
 import { TripSettingsPage } from './pages/trip/TripSettingsPage'
@@ -23,6 +25,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <AuthGate>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/new" element={<NewTripPage />} />
@@ -35,10 +38,12 @@ export default function App() {
             <Route path="expenses/:id" element={<ExpenseFormPage />} />
             <Route path="scan" element={<ScanPage />} />
             <Route path="settle" element={<SettlePage />} />
+            <Route path="summary" element={<SummaryPage />} />
             <Route path="convert" element={<TripConvertPage />} />
             <Route path="edit" element={<TripSettingsPage />} />
           </Route>
         </Routes>
+        </AuthGate>
       </BrowserRouter>
     </QueryClientProvider>
   )

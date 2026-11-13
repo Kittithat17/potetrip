@@ -201,6 +201,16 @@ func TestSuggest(t *testing.T) {
 	if s.Title != "นาย ก" || s.TitleKind != "transfer_to" || s.Amount != nil || s.SpentAt != nil || s.Category != "other" || !s.LowConfid {
 		t.Fatalf("slip suggestion %+v", s)
 	}
+	if len(s.Items) != 0 {
+		t.Fatalf("items should be an empty list, got %+v", s.Items)
+	}
+
+	s = suggest(&Result{Kind: "receipt", Amount: "1250", Currency: "JPY", Items: []Item{
+		{Name: " ラーメン ", Amount: "850"}, {Name: "", Amount: "100"}, {Name: "ぎょうざ", Amount: "abc"}, {Name: "ビール", Amount: "400"},
+	}})
+	if len(s.Items) != 2 || s.Items[0] != (SuggestedItem{Name: "ラーメン", Amount: 850}) || s.Items[1].Amount != 400 {
+		t.Fatalf("items %+v", s.Items)
+	}
 }
 
 func TestDecodeResult(t *testing.T) {

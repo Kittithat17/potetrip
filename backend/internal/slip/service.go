@@ -40,6 +40,13 @@ type Suggestion struct {
 	SpentAt   *time.Time `json:"spent_at"`
 	Category  string     `json:"category"`
 	LowConfid bool       `json:"low_confidence"`
+	// Items are receipt lines in Currency minor units (receipts only).
+	Items []SuggestedItem `json:"items"`
+}
+
+type SuggestedItem struct {
+	Name   string `json:"name"`
+	Amount int64  `json:"amount"`
 }
 
 // Outcome is the per-image response.
@@ -150,7 +157,7 @@ func (s *Service) processOne(ctx context.Context, tripID, uploadedBy uuid.UUID, 
 var categories = map[string]bool{"food": true, "transport": true, "lodging": true, "shopping": true, "activity": true, "other": true}
 
 func suggest(r *Result) *Suggestion {
-	s := &Suggestion{Currency: r.Currency, Category: "other", LowConfid: r.Confidence < 0.6}
+	s := &Suggestion{Currency: r.Currency, Category: "other", LowConfid: r.Confidence < 0.6, Items: []SuggestedItem{}}
 	if categories[r.Category] {
 		s.Category = r.Category
 	}
@@ -169,6 +176,16 @@ func suggest(r *Result) *Suggestion {
 	}
 	if t, err := time.Parse(time.RFC3339, strings.TrimSpace(r.DateTime)); err == nil {
 		s.SpentAt = &t
+	}
+	// Lines that can't be read cleanly are dropped; the user can add them.
+	for _, it := range r.Items {
+		name := strings.TrimSpace(it.Name)
+		if name == "" || r.Currency == "" {
+			continue
+		}
+		if v, err := money.ParseDecimal(it.Amount, r.Currency); err == nil && v > 0 {
+			s.Items = append(s.Items, SuggestedItem{Name: name, Amount: v})
+		}
 	}
 	return s
 }

@@ -19,7 +19,7 @@ const UPLOAD_CONCURRENCY = 3
 export function ScanPage() {
   const i18n = useI18n()
   const { t } = i18n
-  const { trip, token, base, nav } = useTrip()
+  const { trip, base, nav } = useTrip()
   const navigate = useNavigate()
   const [items, setItems] = useState<Item[]>([])
   const [stage, setStage] = useState<'pick' | 'review' | 'done'>('pick')
@@ -55,7 +55,7 @@ export function ScanPage() {
       update(it.key, { status: 'reading' })
       try {
         const name = blob === it.file ? it.file.name : it.file.name.replace(/\.\w+$/, '') + '.jpg'
-        const outcome = await uploadSlip(trip.id, token, blob, name)
+        const outcome = await uploadSlip(trip.id, blob, name)
         update(it.key, { status: outcome.status, outcome, error: slipError(outcome, i18n) })
       } catch (err) {
         update(it.key, {
@@ -218,7 +218,7 @@ function SlipSummary({ item, baseCurrency }: { item: Item; baseCurrency: string 
           {t('scan.foreign', { cur: sug.currency, base: baseCurrency })}
         </p>
       )}
-      {sug?.low_confidence && !foreign && (
+      {sug?.low_confidence && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{t('scan.lowConfidence')}</p>
       )}
     </div>
@@ -253,7 +253,9 @@ function draftFrom(o: SlipOutcome | undefined, baseCurrency: string, i18n: I18n)
   if (!s || !o) return {}
   return {
     title: suggestedTitle(o, i18n),
-    amount: s.currency === baseCurrency ? s.amount : null,
+    amount: s.amount,
+    currency: s.currency || baseCurrency,
+    items: s.items,
     spentAt: s.spent_at,
     category: s.category,
   }

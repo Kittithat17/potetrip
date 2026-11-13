@@ -3,7 +3,7 @@
 เว็บแอป (PWA) หารค่าใช้จ่ายตอนเที่ยวกับเพื่อน อ่านสลิปด้วย AI และรองรับหลายสกุลเงิน
 สเปกเต็มอยู่ที่ `TRAVEL_SPLIT_SPEC.md`
 
-> **สถานะ:** Milestone 3 (AI อ่านสลิป) เสร็จแล้ว สร้างทริป ชวนเพื่อน (หน้าแรกจำทริปที่เคยเข้าไว้ในเครื่อง) บันทึกรายจ่ายแบบหารเท่ากันหรือระบุยอด สแกนสลิปหลายรูปให้ AI อ่านแล้วตรวจก่อนบันทึก และดูว่าใครต้องโอนให้ใครได้ ยังรองรับเฉพาะสกุลเงินหลักของทริป (หลายสกุลเงินมาใน M4)
+> **สถานะ:** Milestone 4 (หลายสกุลเงิน + รายเมนู + QR) และระบบเข้าสู่ระบบด้วย Google เสร็จแล้ว สร้างทริป ชวนเพื่อน บันทึกรายจ่ายสกุลไหนก็ได้ (แปลงเป็นสกุลหลักด้วยเรตของวันที่จ่าย หรือใส่เรตเอง) หารเท่ากัน ระบุยอด หรือรายเมนู สแกนสลิปให้ AI อ่าน (ดึงรายการเมนูจากใบเสร็จได้) เคลียร์เงินพร้อม QR พร้อมเพย์ และดูหน้าสรุปพร้อมกราฟ
 
 ## สิ่งที่ต้องมีในเครื่อง
 
@@ -108,25 +108,69 @@ docker-compose.yml    Postgres 17 สำหรับ dev
 
 backend เก็บเรตไว้ในตาราง `fx_rates`: เรตของวันที่ผ่านมาเกิน 7 วันเก็บถาวร ส่วนเรตล่าสุด refresh ทุกชั่วโมง ถ้า Frankfurter ล่มจะใช้เรตใน cache แทนและตอบ `stale: true`
 
-## การเข้าทริปและการยืนยันตัวตน
+## รายจ่ายหลายสกุลเงินและการหารรายเมนู (M4)
 
-ไม่มีระบบ login แต่ละเครื่องได้ **token ลับ** แยกต่อทริป (สุ่ม 256 บิต ฝั่ง DB เก็บแค่ SHA-256) แล้วส่งมาทาง header `X-Device-Token` (ต่างจาก spec เดิมที่ใช้ `X-Member-Id` เพราะ member id ไม่ใช่ความลับ)
+- **หลายสกุลเงิน:** รายจ่ายเลือกสกุลเองได้ backend แปลงเป็นสกุลหลักด้วยเรตอ้างอิงของ **วันที่จ่าย** (ถ้าเป็นวันในอนาคตใช้เรตล่าสุด) เก็บเรตไว้ใน `expenses.fx_rate` (ทศนิยม 8 ตำแหน่ง) แล้วปัดครึ่งขึ้นเป็นหน่วยย่อย ผู้ใช้ส่ง `fx_rate` ของตัวเองได้ (เช่นเรตร้านแลกเงิน) ซึ่งจำเป็นสำหรับสกุลที่ไม่มีเรตอ้างอิง เช่น VND หรือ TWD ตอนแก้ไขรายการ ฟอร์มจะใช้เรตเดิมที่บันทึกไว้ เว้นแต่กดกลับไปใช้เรตอ้างอิง
+- **รายเมนู (`split_type: items`):** แต่ละรายการมีชื่อ ราคา (สกุลของรายจ่าย) และคนที่กิน ยอดรวมของบิลไม่จำเป็นต้องเท่ากับผลรวมรายการ ส่วนต่าง (VAT ค่าบริการ ส่วนลด) จะเฉลี่ยตามราคาของแต่ละรายการ แล้วแต่ละรายการหารเท่ากันในคนที่กิน เศษให้ตามลำดับที่เข้าทริป ผลรวมจึงเท่ากับ `amount_base` เสมอ
+- **สแกนใบเสร็จ:** ถ้า AI อ่านรายการเมนูได้ ฟอร์มจะเปิดเป็นแบบรายเมนูพร้อมรายการให้เลย และใช้สกุลเงินตามใบเสร็จ
+- **QR พร้อมเพย์:** ใส่พร้อมเพย์ของตัวเองได้ในตั้งค่าทริป หน้าเคลียร์เงินจะมีปุ่ม QR (ใช้ `promptpay-qr` + `qrcode` สร้างในเครื่อง) ถ้าทริปไม่ได้ใช้บาท ยอดใน QR เป็นค่าประมาณจากเรตอ้างอิงล่าสุด
+- **หน้าสรุป:** ยอดรวม ตามหมวดหมู่ รายคน (จ่ายแทนกลุ่มเทียบกับส่วนของตัวเอง) และสกุลเงินที่ใช้
 
-- **คนสร้างทริป** เป็นเจ้าของ และได้อนุมัติอัตโนมัติ
-- **คนที่ได้ลิงก์เชิญ** ทำได้แค่ส่งคำขอ (ชื่อใหม่ หรืออ้างว่าเป็นสมาชิกเดิมที่ใช้เครื่องใหม่) แล้วรอ ระหว่างนี้เรียกได้แค่ `/me`
-- **เฉพาะเจ้าของทริป** เห็นและอนุมัติ/ปฏิเสธคำขอได้
+## การเข้าสู่ระบบและสิทธิ์เข้าทริป
+
+**ทุกคนต้องเข้าสู่ระบบด้วย Google ก่อน** ถ้ายังไม่เข้าสู่ระบบ จะเปิดหน้าไหนหรือเรียก API ไหนไม่ได้เลย ยกเว้น `/healthz` และ `/api/v1/auth/*` หลังเข้าสู่ระบบ แอปจะพากลับไปหน้าที่เปิดไว้ เช่นลิงก์เชิญ
+
+- **Session อยู่ในคุกกี้ HttpOnly** JavaScript อ่านไม่ได้ จึงขโมยผ่าน XSS ไม่ได้ ตั้งค่า `SameSite=Lax` ถ้า `PUBLIC_URL` เป็น https จะใช้ชื่อ `__Host-ts_session` และเป็น `Secure` ฝั่ง DB เก็บแค่ SHA-256 ของ token อายุ 60 วัน และต่ออายุอัตโนมัติเมื่อมีการใช้งาน ส่วนการออกจากระบบจะลบ session ที่เซิร์ฟเวอร์ด้วย
+- **ไม่มีข้อมูลลับใน localStorage** localStorage เหลือแค่ภาษาและคู่สกุลเงินที่เลือกไว้
+- **กัน CSRF:** คำขอที่แก้ข้อมูลต้องมี header `X-Requested-With: travel-split` และถ้า `Sec-Fetch-Site` เป็น `cross-site` จะถูกปฏิเสธ (403 `csrf`)
+- **Google OAuth:** ใช้ authorization code + PKCE + `state` ในคุกกี้ HttpOnly อายุ 10 นาที `client_secret` อยู่แค่ฝั่งเซิร์ฟเวอร์ และตรวจ `iss`, `aud`, `exp` กับ `email_verified` ของ ID token ส่วนหน้าที่จะกลับไปหลังล็อกอินต้องเป็น path ในเว็บเราเท่านั้น (กัน open redirect)
+- **ห้ามใช้ `AUTH_PROVIDER=mock` บนเว็บจริง** โหมดนี้ใช้ตอน dev เท่านั้น พิมพ์ชื่ออะไรก็เข้าได้ และเซิร์ฟเวอร์จะไม่ยอมเริ่มถ้า `PUBLIC_URL` เป็น https
+- **เครื่องที่เคยใช้แอปก่อนมีระบบล็อกอิน:** ล็อกอินครั้งแรกแล้ว แอปจะส่ง token เดิมใน localStorage ไปผูกทริปเข้ากับบัญชี (`POST /auth/claim`) จากนั้นเซิร์ฟเวอร์ทำให้ token นั้นใช้ไม่ได้อีก และแอปลบออกจากเครื่อง
+
+สิทธิ์ในทริป:
+- **คนสร้างทริป** เป็นเจ้าของ ได้รับอนุมัติอัตโนมัติ และออกจากทริปไม่ได้
+- **คนที่ได้ลิงก์เชิญ** ทำได้แค่ส่งคำขอ (ใช้ชื่อใหม่ หรืออ้างว่าเป็นสมาชิกเดิม) แล้วรอ ระหว่างรอเรียกได้แค่ `/me` ถ้าถูกปฏิเสธจะขอใหม่ได้
+- **เฉพาะเจ้าของทริป** เห็นและอนุมัติหรือปฏิเสธคำขอได้
 - รายชื่อที่คนถือรหัสเชิญเห็นมีแค่ชื่อ ไม่มีเบอร์พร้อมเพย์
+- ทริปผูกกับบัญชี ล็อกอินบัญชีเดิมบนเครื่องไหนก็ได้ทริปคืนครบ
+
+### ตั้งค่า Google (ทำครั้งเดียว)
+
+1. เข้า [Google Cloud Console](https://console.cloud.google.com) แล้วสร้าง Project
+2. ไปที่ **Google Auth Platform** (หรือ **OAuth consent screen**) ใส่ชื่อแอปและอีเมล แล้วเลือกประเภทผู้ใช้เป็น **External**
+3. ไปที่ **Clients** แล้วสร้าง **OAuth client ID** ประเภท **Web application**
+4. ช่อง **Authorized redirect URIs** ใส่ `{PUBLIC_URL}/api/v1/auth/google/callback` เช่น `http://localhost:5173/api/v1/auth/google/callback` ตอน deploy ให้เพิ่มของโดเมนจริงที่เป็น https
+5. ใส่ค่าในไฟล์ `.env` ได้แก่ `AUTH_PROVIDER=google`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` และ `PUBLIC_URL`
+6. ตอนที่แอปยังอยู่ในโหมด Testing ต้องเพิ่มอีเมลของคนที่จะทดสอบไว้ใน **Test users** ก่อน ถ้าจะเปิดให้ทุกคนใช้ ต้องกด **Publish app**
+
+Google ไม่รับ redirect ไปที่ IP ในวง LAN เช่น `192.168.x.x` ถ้าจะลองบนมือถือก่อน deploy ให้ใช้ `AUTH_PROVIDER=mock` หรือใช้ tunnel ที่เป็น https
 
 ## API
 
-Base path `/api/v1` สถานะ: ไม่ส่ง token → 401 `token_required`, token ไม่ใช่ของทริปนี้ → 403 `not_a_member`, รออนุมัติ → 403 `pending_approval`, ถูกปฏิเสธ → 403 `join_rejected`
+Base path `/api/v1` ทุก endpoint (ยกเว้น `healthz` และ `auth/*`) ต้องเข้าสู่ระบบก่อน
+
+รหัสสถานะ:
+- ยังไม่เข้าสู่ระบบ → 401 `login_required`
+- ไม่ได้อยู่ในทริปนี้ → 403 `not_a_member`
+- รออนุมัติ → 403 `pending_approval`
+- ถูกปฏิเสธ → 403 `join_rejected`
+- คำขอแก้ข้อมูลที่ไม่มี header กัน CSRF → 403 `csrf`
 
 | Method | Path | สิทธิ์ | หมายเหตุ |
 |---|---|---|---|
-| POST | `/trips` | ทุกคน | `{name, creator_name, base_currency?, promptpay?}` คืน `{trip, member, token}` |
-| GET | `/trips/{inviteCode}` | ทุกคน | `{trip, members: [{id, name}]}` |
-| POST | `/trips/{tripId}/join` | ทุกคน | `{name, promptpay?}` หรือ `{member_id}` คืน `{token, request}` (รอได้สูงสุด 20 คำขอต่อทริป) |
-| GET | `/trips/{tripId}/me` | มี token | `{status, member, is_owner, request}` |
+| GET | `/auth/config` | ทุกคน | `{provider: "google" \| "mock"}` |
+| GET | `/auth/google/start?next=/path` | ทุกคน | redirect ไป Google |
+| GET | `/auth/google/callback` | ทุกคน | Google ส่งกลับมาที่นี่ แล้วตั้งคุกกี้และ redirect ไป `next` |
+| POST | `/auth/mock` | ทุกคน (เฉพาะโหมด mock) | `{name}` |
+| POST | `/auth/logout` | ทุกคน | ลบ session |
+| GET | `/auth/me` | เข้าสู่ระบบ | `{id, email, name, picture}` |
+| POST | `/auth/claim` | เข้าสู่ระบบ | `{tokens: [...]}` ย้ายทริปจาก token แบบเก่ามาไว้ในบัญชี |
+| GET | `/me/trips` | เข้าสู่ระบบ | ทริปที่อยู่หรือรออนุมัติ `[{id, name, invite_code, status, member_name, is_owner}]` |
+| POST | `/trips` | เข้าสู่ระบบ | `{name, creator_name?, base_currency?, promptpay?}` คืน `{trip, member}` (ถ้าไม่ส่ง `creator_name` จะใช้ชื่อบัญชี) |
+| GET | `/trips/{inviteCode}` | เข้าสู่ระบบ | `{trip, members: [{id, name}]}` |
+| POST | `/trips/{tripId}/join` | เข้าสู่ระบบ | `{name?, promptpay?}` หรือ `{member_id}` คืน `{request}` (รอได้สูงสุด 20 คำขอต่อทริป) |
+| GET | `/trips/{tripId}/me` | อยู่ในทริปหรือรออนุมัติ | `{status, member, is_owner, request}` |
+| DELETE | `/trips/{tripId}/me` | อยู่ในทริปหรือรออนุมัติ | ออกจากทริปหรือยกเลิกคำขอ (เจ้าของทริปทำไม่ได้: 409 `owner_cannot_leave`) |
 | GET | `/trips/{tripId}/members` | สมาชิก | |
 | GET | `/trips/{tripId}/expenses?category=&member=` | สมาชิก | `member` = คนจ่ายหรือคนที่หารด้วย |
 | POST/PUT | `/trips/{tripId}/expenses[/{id}]` | สมาชิก | ดูตัวอย่างด้านล่าง |
@@ -135,11 +179,13 @@ Base path `/api/v1` สถานะ: ไม่ส่ง token → 401 `token_req
 | GET | `/trips/{tripId}/settlement` | สมาชิก | รายการโอนที่น้อยที่สุด |
 | POST | `/trips/{tripId}/settlements/paid` | สมาชิก | `{from, to, amount_base}` |
 | POST | `/trips/{tripId}/slips` | สมาชิก | multipart ไฟล์รูปได้สูงสุด 10 รูป |
+| GET | `/trips/{tripId}/summary` | สมาชิก | `{total, count, by_category, by_currency, by_member: [{member_id, paid, consumed}]}` |
+| PATCH | `/trips/{tripId}/me` | สมาชิก | `{promptpay}` แก้พร้อมเพย์ของตัวเอง (`null` หรือ `""` = ลบ) |
 | PATCH | `/trips/{tripId}` | เจ้าของ | `{name?, base_currency?}` สกุลเงินหลักล็อกเมื่อมีรายจ่ายหรือการโอนคืนแล้ว (409 `currency_locked`) |
 | GET | `/trips/{tripId}/join-requests` | เจ้าของ | คำขอที่รออยู่ |
 | POST | `/trips/{tripId}/join-requests/{id}/approve` \| `reject` | เจ้าของ | |
-| GET | `/fx?from=CNY&to=THB[&date=YYYY-MM-DD]` | ทุกคน | อัตราแลกเปลี่ยน |
-| GET | `/fx/currencies` | ทุกคน | สกุลที่รองรับ |
+| GET | `/fx?from=CNY&to=THB[&date=YYYY-MM-DD]` | เข้าสู่ระบบ | อัตราแลกเปลี่ยน |
+| GET | `/fx/currencies` | เข้าสู่ระบบ | สกุลที่รองรับ |
 
 ตัวอย่างรายจ่าย (`amount` เป็นหน่วยย่อย 125000 = ฿1,250.00):
 
@@ -149,7 +195,16 @@ Base path `/api/v1` สถานะ: ไม่ส่ง token → 401 `token_req
 
 { "title": "แท็กซี่", "category": "transport", "paid_by": "<id>", "amount": 45000,
   "split_type": "exact", "shares": [{"member_id": "<id>", "amount": 15000}, {"member_id": "<id>", "amount": 30000}] }
+
+{ "title": "Ichiran", "category": "food", "paid_by": "<id>", "amount": 4500, "currency": "JPY",
+  "spent_at": "2026-11-10T19:30:00+07:00", "split_type": "equal", "member_ids": ["<id>", "<id>"] }
+
+{ "title": "Pho", "category": "food", "paid_by": "<id>", "amount": 150000, "currency": "VND", "fx_rate": "0.00136",
+  "split_type": "items", "items": [{"name": "Pho bo", "amount": 100000, "member_ids": ["<id>"]},
+                                   {"name": "Coffee", "amount": 50000, "member_ids": ["<id>", "<id>"]}] }
 ```
+
+ใน `exact` และ `items` ยอดของแต่ละคน/แต่ละรายการเป็นสกุลของรายจ่าย (`currency`) ส่วน `shares` ที่ API คืนมาเป็นสกุลหลักของทริปเสมอ
 
 เศษจากการหารเท่ากันจะเพิ่มทีละ 1 หน่วยย่อยให้สมาชิกตามลำดับที่เข้าทริป ผลรวม `shares` จึงเท่ากับ `amount_base` เสมอ
 

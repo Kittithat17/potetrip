@@ -1,3 +1,6 @@
+import { QrCode } from 'lucide-react'
+import { useState } from 'react'
+import { Link } from 'react-router'
 import { useBalances, useMarkPaid, useSettlement } from '../../api/hooks'
 import type { Transfer } from '../../api/types'
 import { Approx } from '../../components/Approx'
@@ -8,16 +11,20 @@ import { HOME_CURRENCY, useHomeApprox } from '../../lib/homeApprox'
 import { formatMoney } from '../../lib/money'
 import { useTrip } from './context'
 import { useConfirm } from '../../lib/confirm'
+import { PromptPayDialog } from './PromptPayDialog'
 
 export function SettlePage() {
   const { t, locale } = useI18n()
-  const { trip, me, token, members, memberName, base, nav } = useTrip()
+  const { trip, me, members, memberName, base, nav } = useTrip()
   const cur = trip.base_currency
-  const planQ = useSettlement(trip.id, token)
-  const balQ = useBalances(trip.id, token)
-  const paid = useMarkPaid(trip.id, token)
+  const planQ = useSettlement(trip.id)
+  const balQ = useBalances(trip.id)
+  const paid = useMarkPaid(trip.id)
   const home = useHomeApprox(cur)
   const confirm = useConfirm()
+  const [qrFor, setQrFor] = useState<Transfer | null>(null)
+  const promptpayOf = (id: string) => members.find((m) => m.id === id)?.promptpay ?? null
+  const qrReceiver = qrFor ? promptpayOf(qrFor.to) : null
 
   const onPaid = async (tr: Transfer) => {
     const title = t('settle.confirmPaid', { from: memberName(tr.from), to: memberName(tr.to), amount: formatMoney(tr.amount_base, cur) })
@@ -61,15 +68,37 @@ export function SettlePage() {
                         <span className="block text-xl font-bold tabular-nums">{formatMoney(tr.amount_base, cur)}</span>
                         <Approx minor={tr.amount_base} currency={cur} />
                       </span>
-                      <Button variant="secondary" className="min-h-9 text-sm" onClick={() => onPaid(tr)} disabled={paid.isPending}>
-                        {t('settle.paid')}
-                      </Button>
+                      <span className="flex gap-2">
+                        {promptpayOf(tr.to) && (
+                          <Button variant="secondary" className="min-h-9 px-3 text-sm" onClick={() => setQrFor(tr)} aria-label={t('settle.qr')}>
+                            <QrCode className="size-4" /> {t('settle.qr')}
+                          </Button>
+                        )}
+                        <Button variant="secondary" className="min-h-9 text-sm" onClick={() => onPaid(tr)} disabled={paid.isPending}>
+                          {t('settle.paid')}
+                        </Button>
+                      </span>
                     </div>
+                    {tr.to === me.id && !promptpayOf(tr.to) && (
+                      <p className="mt-2 text-xs text-slate-500">
+                        {t('settle.addPromptPay')}{' '}
+                        <Link to={`${base}/edit`} className="text-brand-700 underline">
+                          {t('settle.addPromptPayLink')}
+                        </Link>
+                      </p>
+                    )}
                   </li>
                 ))}
             </ul>
           )}
           <ErrorText error={paid.error} />
+          <PromptPayDialog
+            transfer={qrFor}
+            receiverName={qrFor ? memberName(qrFor.to) : ''}
+            promptpay={qrReceiver ?? ''}
+            currency={cur}
+            onClose={() => setQrFor(null)}
+          />
         </Card>
 
         <Card>

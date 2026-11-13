@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, HandCoins, Plus, ScanLine, Settings2, Share2, UserPlus } from 'lucide-react'
+import { ChartPie, ChevronLeft, ChevronRight, HandCoins, Plus, ScanLine, Settings2, Share2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useBalances, useExpenses } from '../../api/hooks'
@@ -18,10 +18,10 @@ import { InviteDialog } from './InviteDialog'
 
 export function DashboardPage() {
   const { t } = useI18n()
-  const { trip, me, token, isOwner, members, memberName, base, leave, nav } = useTrip()
+  const { trip, me, isOwner, members, memberName, base, leave, nav } = useTrip()
   const cur = trip.base_currency
-  const expensesQ = useExpenses(trip.id, token)
-  const balancesQ = useBalances(trip.id, token)
+  const expensesQ = useExpenses(trip.id)
+  const balancesQ = useBalances(trip.id)
   const [category, setCategory] = useState<Category | null>(null)
   const [onlyMine, setOnlyMine] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -52,8 +52,12 @@ export function DashboardPage() {
   }
 
   const onLeave = async () => {
-    const ok = await confirm({ title: t('trip.leaveTitle'), message: t('trip.leaveConfirm'), confirmLabel: t('trip.leaveAction') })
-    if (ok) leave()
+    const ok = await confirm({
+      title: t('trip.leaveTitle'),
+      message: t('trip.leaveConfirm'),
+      confirmLabel: t('trip.leaveAction'),
+    })
+    if (ok) await leave()
   }
 
   return (
@@ -80,13 +84,12 @@ export function DashboardPage() {
         <div className="mt-4 flex items-end justify-between">
           <div>
             <p className="text-sm text-brand-100">
-              {t('trip.hello', { name: me.name })}{' '}
-              <button
-                onClick={onLeave}
-                className="ml-1 text-xs text-brand-200 underline"
-              >
-                {t('trip.notMe')}
-              </button>
+              {t('trip.hello', { name: me.name })}
+              {!isOwner && (
+                <button onClick={onLeave} className="ml-2 text-xs text-brand-200 underline">
+                  {t('trip.leaveAction')}
+                </button>
+              )}
             </p>
             {!myBalance ? (
               <p className="mt-1 text-3xl font-bold">…</p>
@@ -121,7 +124,7 @@ export function DashboardPage() {
             <IconAction icon={Plus} label={t('trip.addExpense')} to={`${base}/expenses/new`} />
             <IconAction icon={ScanLine} label={t('trip.scanSlip')} to={`${base}/scan`} />
             <IconAction icon={HandCoins} label={t('trip.settle')} to={`${base}/settle`} />
-            <IconAction icon={UserPlus} label={t('trip.invite')} onClick={share} />
+            <IconAction icon={ChartPie} label={t('trip.summary')} to={`${base}/summary`} />
           </div>
         </Sheet>
 

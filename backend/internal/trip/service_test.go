@@ -45,14 +45,3 @@ func TestNormalizePromptPay(t *testing.T) {
 		}
 	}
 }
-
-func TestNewToken(t *testing.T) {
-	a, ha := newToken()
-	b, hb := newToken()
-	if a == b || len(a) < 40 {
-		t.Fatalf("weak tokens %q %q", a, b)
-	}
-	if string(hashToken(a)) != string(ha) || string(ha) == string(hb) {
-		t.Fatal("hash mismatch")
-	}
-}

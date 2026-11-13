@@ -14,7 +14,7 @@ import (
 const approveDevice = `-- name: ApproveDevice :one
 UPDATE devices SET status = 'approved', member_id = $3, decided_at = now()
 WHERE id = $1 AND trip_id = $2 AND status = 'pending'
-RETURNING id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at
+RETURNING id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at, user_id
 `
 
 type ApproveDeviceParams struct {
@@ -37,6 +37,38 @@ func (q *Queries) ApproveDevice(ctx context.Context, arg ApproveDeviceParams) (D
 		&i.Promptpay,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.UserID,
+	)
+	return i, err
+}
+
+const claimDevice = `-- name: ClaimDevice :one
+UPDATE devices SET user_id = $2, token_hash = NULL
+WHERE token_hash = $1 AND user_id IS NULL
+RETURNING id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at, user_id
+`
+
+type ClaimDeviceParams struct {
+	TokenHash []byte     `json:"token_hash"`
+	UserID    *uuid.UUID `json:"user_id"`
+}
+
+// Moves a pre-login device token onto the signed-in user, then forgets the token.
+func (q *Queries) ClaimDevice(ctx context.Context, arg ClaimDeviceParams) (Device, error) {
+	row := q.db.QueryRow(ctx, claimDevice, arg.TokenHash, arg.UserID)
+	var i Device
+	err := row.Scan(
+		&i.ID,
+		&i.TripID,
+		&i.TokenHash,
+		&i.Status,
+		&i.MemberID,
+		&i.RequestedName,
+		&i.RequestedMemberID,
+		&i.Promptpay,
+		&i.CreatedAt,
+		&i.DecidedAt,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -53,14 +85,14 @@ func (q *Queries) CountPendingDevices(ctx context.Context, tripID uuid.UUID) (in
 }
 
 const createDevice = `-- name: CreateDevice :one
-INSERT INTO devices (trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay)
+INSERT INTO devices (trip_id, user_id, status, member_id, requested_name, requested_member_id, promptpay)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at
+RETURNING id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at, user_id
 `
 
 type CreateDeviceParams struct {
 	TripID            uuid.UUID  `json:"trip_id"`
-	TokenHash         []byte     `json:"token_hash"`
+	UserID            *uuid.UUID `json:"user_id"`
 	Status            string     `json:"status"`
 	MemberID          *uuid.UUID `json:"member_id"`
 	RequestedName     string     `json:"requested_name"`
@@ -71,7 +103,7 @@ type CreateDeviceParams struct {
 func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Device, error) {
 	row := q.db.QueryRow(ctx, createDevice,
 		arg.TripID,
-		arg.TokenHash,
+		arg.UserID,
 		arg.Status,
 		arg.MemberID,
 		arg.RequestedName,
@@ -90,12 +122,41 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) (Dev
 		&i.Promptpay,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
+const deleteDeviceForUser = `-- name: DeleteDeviceForUser :exec
+DELETE FROM devices WHERE trip_id = $1 AND user_id = $2
+`
+
+type DeleteDeviceForUserParams struct {
+	TripID uuid.UUID  `json:"trip_id"`
+	UserID *uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) DeleteDeviceForUser(ctx context.Context, arg DeleteDeviceForUserParams) error {
+	_, err := q.db.Exec(ctx, deleteDeviceForUser, arg.TripID, arg.UserID)
+	return err
+}
+
+const deleteRejectedDevice = `-- name: DeleteRejectedDevice :exec
+DELETE FROM devices WHERE trip_id = $1 AND user_id = $2 AND status = 'rejected'
+`
+
+type DeleteRejectedDeviceParams struct {
+	TripID uuid.UUID  `json:"trip_id"`
+	UserID *uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) DeleteRejectedDevice(ctx context.Context, arg DeleteRejectedDeviceParams) error {
+	_, err := q.db.Exec(ctx, deleteRejectedDevice, arg.TripID, arg.UserID)
+	return err
+}
+
 const getDevice = `-- name: GetDevice :one
-SELECT id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at FROM devices WHERE id = $1 AND trip_id = $2
+SELECT id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at, user_id FROM devices WHERE id = $1 AND trip_id = $2
 `
 
 type GetDeviceParams struct {
@@ -117,16 +178,22 @@ func (q *Queries) GetDevice(ctx context.Context, arg GetDeviceParams) (Device, e
 		&i.Promptpay,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
-const getDeviceByToken = `-- name: GetDeviceByToken :one
-SELECT id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at FROM devices WHERE token_hash = $1
+const getDeviceForUser = `-- name: GetDeviceForUser :one
+SELECT id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at, user_id FROM devices WHERE trip_id = $1 AND user_id = $2
 `
 
-func (q *Queries) GetDeviceByToken(ctx context.Context, tokenHash []byte) (Device, error) {
-	row := q.db.QueryRow(ctx, getDeviceByToken, tokenHash)
+type GetDeviceForUserParams struct {
+	TripID uuid.UUID  `json:"trip_id"`
+	UserID *uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetDeviceForUser(ctx context.Context, arg GetDeviceForUserParams) (Device, error) {
+	row := q.db.QueryRow(ctx, getDeviceForUser, arg.TripID, arg.UserID)
 	var i Device
 	err := row.Scan(
 		&i.ID,
@@ -139,12 +206,13 @@ func (q *Queries) GetDeviceByToken(ctx context.Context, tokenHash []byte) (Devic
 		&i.Promptpay,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const listPendingDevices = `-- name: ListPendingDevices :many
-SELECT id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at FROM devices
+SELECT id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at, user_id FROM devices
 WHERE trip_id = $1 AND status = 'pending'
 ORDER BY created_at
 `
@@ -169,6 +237,7 @@ func (q *Queries) ListPendingDevices(ctx context.Context, tripID uuid.UUID) ([]D
 			&i.Promptpay,
 			&i.CreatedAt,
 			&i.DecidedAt,
+			&i.UserID,
 		); err != nil {
 			return nil, err
 		}
@@ -183,7 +252,7 @@ func (q *Queries) ListPendingDevices(ctx context.Context, tripID uuid.UUID) ([]D
 const rejectDevice = `-- name: RejectDevice :one
 UPDATE devices SET status = 'rejected', decided_at = now()
 WHERE id = $1 AND trip_id = $2 AND status = 'pending'
-RETURNING id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at
+RETURNING id, trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay, created_at, decided_at, user_id
 `
 
 type RejectDeviceParams struct {
@@ -205,6 +274,7 @@ func (q *Queries) RejectDevice(ctx context.Context, arg RejectDeviceParams) (Dev
 		&i.Promptpay,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.UserID,
 	)
 	return i, err
 }

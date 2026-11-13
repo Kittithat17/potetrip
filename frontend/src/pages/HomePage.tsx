@@ -6,7 +6,7 @@ import { AppFrame, BlueHeader, IconAction, Sheet, TripCover } from '../component
 import { useI18n } from '../i18n/context'
 import { mainNav } from '../lib/nav'
 import { parseInviteInput } from '../lib/invite'
-import { getRecentTrips } from '../lib/recentTrips'
+import { useMyTrips } from '../api/hooks'
 
 export function HomePage() {
   const { t } = useI18n()
@@ -15,7 +15,7 @@ export function HomePage() {
   const [inviteError, setInviteError] = useState('')
   const [showHelp, setShowHelp] = useState(false)
   const inviteRef = useRef<HTMLInputElement>(null)
-  const recent = getRecentTrips()
+  const recent = useMyTrips().data ?? []
 
   const onJoin = (e: FormEvent) => {
     e.preventDefault()
@@ -60,7 +60,7 @@ export function HomePage() {
         {recent.length > 0 && (
           <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4">
             {recent.slice(0, 6).map((tr) => (
-              <Link key={tr.id} to={`/t/${tr.code}`} className="shrink-0 rounded-lg bg-white/15 px-3 py-1 text-sm backdrop-blur hover:bg-white/25">
+              <Link key={tr.id} to={`/t/${tr.invite_code}`} className="shrink-0 rounded-lg bg-white/15 px-3 py-1 text-sm backdrop-blur hover:bg-white/25">
                 {tr.name}
               </Link>
             ))}
@@ -95,11 +95,11 @@ export function HomePage() {
             </div>
             <div className="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1">
               {recent.slice(0, 8).map((tr) => (
-                <Link key={tr.id} to={`/t/${tr.code}`} className="w-40 shrink-0 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
+                <Link key={tr.id} to={`/t/${tr.invite_code}`} className="w-40 shrink-0 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
                   <TripCover name={tr.name} className="h-24" />
                   <div className="p-3">
                     <p className="truncate font-semibold">{tr.name}</p>
-                    <p className="truncate text-xs text-slate-500">{tr.myName ? t('home.youAre', { name: tr.myName }) : tr.code}</p>
+                    <p className="truncate text-xs text-slate-500">{tr.status === 'pending' ? t('myTrips.pending') : tr.member_name ? t('home.youAre', { name: tr.member_name }) : tr.invite_code}</p>
                   </div>
                 </Link>
               ))}

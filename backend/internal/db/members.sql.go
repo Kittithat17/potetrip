@@ -84,3 +84,28 @@ func (q *Queries) ListMembers(ctx context.Context, tripID uuid.UUID) ([]Member, 
 	}
 	return items, nil
 }
+
+const updateMemberPromptPay = `-- name: UpdateMemberPromptPay :one
+UPDATE members SET promptpay = $3
+WHERE id = $1 AND trip_id = $2
+RETURNING id, trip_id, name, promptpay, created_at
+`
+
+type UpdateMemberPromptPayParams struct {
+	ID        uuid.UUID `json:"id"`
+	TripID    uuid.UUID `json:"trip_id"`
+	Promptpay *string   `json:"promptpay"`
+}
+
+func (q *Queries) UpdateMemberPromptPay(ctx context.Context, arg UpdateMemberPromptPayParams) (Member, error) {
+	row := q.db.QueryRow(ctx, updateMemberPromptPay, arg.ID, arg.TripID, arg.Promptpay)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.TripID,
+		&i.Name,
+		&i.Promptpay,
+		&i.CreatedAt,
+	)
+	return i, err
+}

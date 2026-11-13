@@ -1,25 +1,31 @@
-import { Check, ChevronRight, Info, Languages, Luggage, Trash2, UserRound } from 'lucide-react'
+import { Check, ChevronRight, Info, Languages, LogOut, Luggage } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
+import { useMyTrips } from '../api/hooks'
+import { useAuth } from '../auth/context'
 import { HealthBadge } from '../components/HealthBadge'
 import { AppFrame, BlueHeader } from '../components/shell'
-import { clearIdentity } from '../lib/identity'
+import { Avatar } from '../components/ui'
 import { LANGS, useI18n } from '../i18n/context'
 import { mainNav } from '../lib/nav'
 import { useConfirm } from '../lib/confirm'
-import { forgetAllTrips, getRecentTrips } from '../lib/recentTrips'
 
 export function SettingsPage() {
   const { t, lang, setLang } = useI18n()
   const confirm = useConfirm()
-  const [tripCount, setTripCount] = useState(() => getRecentTrips().length)
+  const { user, logout } = useAuth()
+  const tripCount = useMyTrips().data?.length
+  const [signingOut, setSigningOut] = useState(false)
 
-  const clearDevice = async () => {
-    const ok = await confirm({ title: t('settings.clearDevice'), message: t('settings.clearConfirm'), confirmLabel: t('settings.clearAction') })
+  const onLogout = async () => {
+    const ok = await confirm({ title: t('settings.logout'), message: t('settings.logoutConfirm'), confirmLabel: t('settings.logout') })
     if (!ok) return
-    for (const tr of getRecentTrips()) clearIdentity(tr.id)
-    forgetAllTrips()
-    setTripCount(0)
+    setSigningOut(true)
+    try {
+      await logout()
+    } finally {
+      setSigningOut(false)
+    }
   }
 
   return (
@@ -30,7 +36,19 @@ export function SettingsPage() {
 
       <main className="mx-auto max-w-md space-y-4 px-4 pt-4">
         <Group title={t('settings.account')}>
-          <Row icon={<UserRound className="size-5" />} label={t('settings.profile')} detail={t('settings.comingSoon')} disabled />
+          <Row
+            icon={
+              user.picture ? (
+                <img src={user.picture} alt="" referrerPolicy="no-referrer" className="size-9 rounded-xl object-cover" />
+              ) : (
+                <Avatar name={user.name} size="sm" />
+              )
+            }
+            bare
+            label={user.name}
+            detail={user.email}
+          />
+          <Row icon={<LogOut className="size-5" />} label={t('settings.logout')} onClick={onLogout} danger disabled={signingOut} />
         </Group>
 
         <Group title={t('settings.language')}>
@@ -50,22 +68,14 @@ export function SettingsPage() {
           <Row
             icon={<Luggage className="size-5" />}
             label={t('settings.myTrips')}
-            detail={tripCount === 1 ? t('settings.tripCountOne') : t('settings.tripCount', { n: tripCount })}
+            detail={tripCount === undefined ? undefined : tripCount === 1 ? t('settings.tripCountOne') : t('settings.tripCount', { n: tripCount })}
             to="/trips"
-          />
-          <Row
-            icon={<Trash2 className="size-5" />}
-            label={t('settings.clearDevice')}
-            detail={t('settings.clearDeviceDetail')}
-            onClick={clearDevice}
-            danger
-            disabled={tripCount === 0}
           />
         </Group>
 
         <Group title={t('settings.about')}>
           <Row icon={<Info className="size-5" />} label={t('settings.serverStatus')} right={<HealthBadge />} />
-          <Row icon={<Info className="size-5" />} label={t('settings.version')} detail="0.3 (M3)" />
+          <Row icon={<Info className="size-5" />} label={t('settings.version')} detail="0.5" />
         </Group>
       </main>
     </AppFrame>
@@ -91,14 +101,19 @@ type RowProps = {
   danger?: boolean
   disabled?: boolean
   selected?: boolean // radio-style rows (language)
+  bare?: boolean // icon is a picture, not a glyph on a tinted tile
 }
 
-function Row({ icon, label, detail, right, to, onClick, danger, disabled, selected }: RowProps) {
+function Row({ icon, label, detail, right, to, onClick, danger, disabled, selected, bare }: RowProps) {
   const body = (
     <>
-      <span className={`flex size-9 items-center justify-center rounded-xl ${danger ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-brand-600'}`}>
-        {icon}
-      </span>
+      {bare ? (
+        <span className="flex size-9 shrink-0 items-center justify-center">{icon}</span>
+      ) : (
+        <span className={`flex size-9 items-center justify-center rounded-xl ${danger ? 'bg-red-50 text-red-600' : 'bg-brand-50 text-brand-600'}`}>
+          {icon}
+        </span>
+      )}
       <span className="min-w-0 flex-1">
         <span className={`block font-medium ${danger ? 'text-red-600' : ''}`}>{label}</span>
         {detail && <span className="block truncate text-xs text-slate-500">{detail}</span>}

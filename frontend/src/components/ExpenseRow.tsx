@@ -25,7 +25,11 @@ export function ExpenseRow({ expense: e, to, payerName, myShare, currency }: Pro
         </span>
         <span className="text-right">
           <span className="block font-semibold tabular-nums">{formatMoney(e.amount, e.currency)}</span>
-          <Approx minor={e.amount} currency={e.currency} className="text-[11px] text-slate-400" />
+          {e.currency !== currency ? (
+            <span className="block text-[11px] text-slate-400 tabular-nums">= {formatMoney(e.amount_base, currency)}</span>
+          ) : (
+            <Approx minor={e.amount} currency={e.currency} className="text-[11px] text-slate-400" />
+          )}
           {myShare !== undefined && myShare > 0 && (
             <span className="block text-xs text-slate-500 tabular-nums">{t('trip.myShare', { amount: formatMoney(myShare, currency) })}</span>
           )}

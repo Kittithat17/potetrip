@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"github.com/raisin/travel-split/backend/internal/auth"
 	"github.com/raisin/travel-split/backend/internal/expense"
 	"github.com/raisin/travel-split/backend/internal/fx"
 	"github.com/raisin/travel-split/backend/internal/settlement"
@@ -23,6 +24,8 @@ type Pinger interface {
 
 type Deps struct {
 	DB          Pinger
+	Auth        *auth.Service
+	AuthCfg     AuthConfig
 	Trips       *trip.Service
 	Expenses    *expense.Service
 	Settlements *settlement.Service
@@ -45,49 +48,69 @@ func (s *Server) Routes() http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: s.CORSOrigins,
 		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Content-Type", TokenHeader},
+		AllowedHeaders: []string{"Content-Type", CSRFHeader},
 		MaxAge:         300,
 	}))
 
 	r.Get("/healthz", s.healthz)
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(apiHeaders, csrf)
 		r.Get("/healthz", s.healthz)
-		r.Post("/trips", s.createTrip)
-		r.Get("/fx", s.fxRate)
-		r.Get("/fx/currencies", s.fxCurrencies)
 
-		// {trip} is an invite code on GET /trips/{trip} and a trip UUID below it.
-		r.Route("/trips/{trip}", func(r chi.Router) {
-			r.Get("/", s.getTripByInvite)
+		r.Route("/auth", func(r chi.Router) {
+			r.Get("/config", s.authConfig)
+			r.Get("/google/start", s.googleStart)
+			r.Get("/google/callback", s.googleCallback)
+			r.Post("/mock", s.mockLogin)
+			r.Post("/logout", s.logout)
+			r.With(s.requireUser).Get("/me", s.authMe)
+			r.With(s.requireUser).Post("/claim", s.claimDevices)
+		})
 
-			r.Group(func(r chi.Router) {
-				r.Use(s.loadTrip)
-				// Anyone holding the trip ID may ask to join; nothing else.
-				r.Post("/join", s.requestJoin)
+		// Everything else needs a signed-in user.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireUser)
+			r.Get("/me/trips", s.myTrips)
+			r.Post("/trips", s.createTrip)
+			r.Get("/fx", s.fxRate)
+			r.Get("/fx/currencies", s.fxCurrencies)
+
+			// {trip} is an invite code on GET /trips/{trip} and a trip UUID below it.
+			r.Route("/trips/{trip}", func(r chi.Router) {
+				r.Get("/", s.getTripByInvite)
 
 				r.Group(func(r chi.Router) {
-					r.Use(s.requireDevice)
-					r.Get("/me", s.me) // pending devices poll this
+					r.Use(s.loadTrip)
+					// Anyone holding the trip ID may ask to join; nothing else.
+					r.Post("/join", s.requestJoin)
 
 					r.Group(func(r chi.Router) {
-						r.Use(s.requireMember)
-						r.Get("/members", s.listMembers)
-						r.Get("/expenses", s.listExpenses)
-						r.Post("/expenses", s.createExpense)
-						r.Get("/expenses/{expense}", s.getExpense)
-						r.Put("/expenses/{expense}", s.updateExpense)
-						r.Delete("/expenses/{expense}", s.deleteExpense)
-						r.Get("/balances", s.balances)
-						r.Get("/settlement", s.settlementPlan)
-						r.Post("/settlements/paid", s.markPaid)
-						r.Post("/slips", s.uploadSlips)
+						r.Use(s.requireDevice)
+						r.Get("/me", s.me) // pending devices poll this
+					r.Delete("/me", s.leave)
 
 						r.Group(func(r chi.Router) {
-							r.Use(s.requireOwner)
-							r.Patch("/", s.updateTrip)
-							r.Get("/join-requests", s.listJoinRequests)
-							r.Post("/join-requests/{request}/approve", s.approveJoin)
-							r.Post("/join-requests/{request}/reject", s.rejectJoin)
+							r.Use(s.requireMember)
+							r.Get("/members", s.listMembers)
+							r.Get("/expenses", s.listExpenses)
+							r.Post("/expenses", s.createExpense)
+							r.Get("/expenses/{expense}", s.getExpense)
+							r.Put("/expenses/{expense}", s.updateExpense)
+							r.Delete("/expenses/{expense}", s.deleteExpense)
+							r.Get("/balances", s.balances)
+							r.Get("/settlement", s.settlementPlan)
+							r.Post("/settlements/paid", s.markPaid)
+							r.Post("/slips", s.uploadSlips)
+							r.Get("/summary", s.summary)
+							r.Patch("/me", s.updateMe)
+
+							r.Group(func(r chi.Router) {
+								r.Use(s.requireOwner)
+								r.Patch("/", s.updateTrip)
+								r.Get("/join-requests", s.listJoinRequests)
+								r.Post("/join-requests/{request}/approve", s.approveJoin)
+								r.Post("/join-requests/{request}/reject", s.rejectJoin)
+							})
 						})
 					})
 				})

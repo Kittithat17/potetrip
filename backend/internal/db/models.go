@@ -22,6 +22,7 @@ type Device struct {
 	Promptpay         *string    `json:"promptpay"`
 	CreatedAt         time.Time  `json:"created_at"`
 	DecidedAt         *time.Time `json:"decided_at"`
+	UserID            *uuid.UUID `json:"user_id"`
 }
 
 type Expense struct {
@@ -47,6 +48,7 @@ type ExpenseItem struct {
 	Name      string      `json:"name"`
 	Amount    int64       `json:"amount"`
 	MemberIds []uuid.UUID `json:"member_ids"`
+	Position  int32       `json:"position"`
 }
 
 type ExpenseShare struct {
@@ -70,6 +72,13 @@ type Member struct {
 	Name      string    `json:"name"`
 	Promptpay *string   `json:"promptpay"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type Session struct {
+	TokenHash []byte    `json:"token_hash"`
+	UserID    uuid.UUID `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 type SettlementsPaid struct {
@@ -98,4 +107,14 @@ type Trip struct {
 	InviteCode    string     `json:"invite_code"`
 	CreatedAt     time.Time  `json:"created_at"`
 	OwnerMemberID *uuid.UUID `json:"owner_member_id"`
+}
+
+type User struct {
+	ID          uuid.UUID `json:"id"`
+	GoogleSub   string    `json:"google_sub"`
+	Email       string    `json:"email"`
+	Name        string    `json:"name"`
+	Picture     *string   `json:"picture"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastLoginAt time.Time `json:"last_login_at"`
 }

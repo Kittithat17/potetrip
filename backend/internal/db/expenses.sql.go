@@ -73,6 +73,30 @@ func (q *Queries) CreateExpense(ctx context.Context, arg CreateExpenseParams) (E
 	return i, err
 }
 
+const createItem = `-- name: CreateItem :exec
+INSERT INTO expense_items (expense_id, position, name, amount, member_ids)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type CreateItemParams struct {
+	ExpenseID uuid.UUID   `json:"expense_id"`
+	Position  int32       `json:"position"`
+	Name      string      `json:"name"`
+	Amount    int64       `json:"amount"`
+	MemberIds []uuid.UUID `json:"member_ids"`
+}
+
+func (q *Queries) CreateItem(ctx context.Context, arg CreateItemParams) error {
+	_, err := q.db.Exec(ctx, createItem,
+		arg.ExpenseID,
+		arg.Position,
+		arg.Name,
+		arg.Amount,
+		arg.MemberIds,
+	)
+	return err
+}
+
 const createShare = `-- name: CreateShare :exec
 INSERT INTO expense_shares (expense_id, member_id, amount_base)
 VALUES ($1, $2, $3)
@@ -104,6 +128,15 @@ func (q *Queries) DeleteExpense(ctx context.Context, arg DeleteExpenseParams) (i
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteItems = `-- name: DeleteItems :exec
+DELETE FROM expense_items WHERE expense_id = $1
+`
+
+func (q *Queries) DeleteItems(ctx context.Context, expenseID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteItems, expenseID)
+	return err
 }
 
 const deleteShares = `-- name: DeleteShares :exec
@@ -202,6 +235,39 @@ func (q *Queries) ListExpenses(ctx context.Context, arg ListExpensesParams) ([]E
 	return items, nil
 }
 
+const listItemsForExpenses = `-- name: ListItemsForExpenses :many
+SELECT id, expense_id, name, amount, member_ids, position FROM expense_items
+WHERE expense_id = ANY($1::uuid[])
+ORDER BY expense_id, position
+`
+
+func (q *Queries) ListItemsForExpenses(ctx context.Context, expenseIds []uuid.UUID) ([]ExpenseItem, error) {
+	rows, err := q.db.Query(ctx, listItemsForExpenses, expenseIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExpenseItem{}
+	for rows.Next() {
+		var i ExpenseItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.ExpenseID,
+			&i.Name,
+			&i.Amount,
+			&i.MemberIds,
+			&i.Position,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSharesForExpenses = `-- name: ListSharesForExpenses :many
 SELECT expense_id, member_id, amount_base FROM expense_shares
 WHERE expense_id = ANY($1::uuid[])
@@ -217,6 +283,78 @@ func (q *Queries) ListSharesForExpenses(ctx context.Context, expenseIds []uuid.U
 	for rows.Next() {
 		var i ExpenseShare
 		if err := rows.Scan(&i.ExpenseID, &i.MemberID, &i.AmountBase); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const summaryByCategory = `-- name: SummaryByCategory :many
+SELECT category, SUM(amount_base)::bigint AS amount_base, COUNT(*)::int AS count
+FROM expenses WHERE trip_id = $1
+GROUP BY category
+ORDER BY amount_base DESC
+`
+
+type SummaryByCategoryRow struct {
+	Category   string `json:"category"`
+	AmountBase int64  `json:"amount_base"`
+	Count      int32  `json:"count"`
+}
+
+func (q *Queries) SummaryByCategory(ctx context.Context, tripID uuid.UUID) ([]SummaryByCategoryRow, error) {
+	rows, err := q.db.Query(ctx, summaryByCategory, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SummaryByCategoryRow{}
+	for rows.Next() {
+		var i SummaryByCategoryRow
+		if err := rows.Scan(&i.Category, &i.AmountBase, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const summaryByCurrency = `-- name: SummaryByCurrency :many
+SELECT currency, SUM(amount)::bigint AS amount, SUM(amount_base)::bigint AS amount_base, COUNT(*)::int AS count
+FROM expenses WHERE trip_id = $1
+GROUP BY currency
+ORDER BY amount_base DESC
+`
+
+type SummaryByCurrencyRow struct {
+	Currency   string `json:"currency"`
+	Amount     int64  `json:"amount"`
+	AmountBase int64  `json:"amount_base"`
+	Count      int32  `json:"count"`
+}
+
+func (q *Queries) SummaryByCurrency(ctx context.Context, tripID uuid.UUID) ([]SummaryByCurrencyRow, error) {
+	rows, err := q.db.Query(ctx, summaryByCurrency, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SummaryByCurrencyRow{}
+	for rows.Next() {
+		var i SummaryByCurrencyRow
+		if err := rows.Scan(
+			&i.Currency,
+			&i.Amount,
+			&i.AmountBase,
+			&i.Count,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

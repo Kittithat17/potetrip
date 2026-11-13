@@ -4,6 +4,8 @@ import (
 	"math"
 	"slices"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestSplitEqual(t *testing.T) {
@@ -68,5 +70,62 @@ func TestAllocateErrors(t *testing.T) {
 	}
 	if _, err := Allocate(-1, []int64{1}); err == nil {
 		t.Error("negative total: want error")
+	}
+}
+
+func TestSplitItems(t *testing.T) {
+	a, b, c := uuid.New(), uuid.New(), uuid.New()
+	order := map[uuid.UUID]int{a: 0, b: 1, c: 2}
+
+	// Bill ฿1,000 (items ฿900 + ฿100 service). Ramen ฿600 for A only, gyoza
+	// ฿300 shared by all three; service is spread by price.
+	items := []Item{
+		{Name: "ramen", Amount: 60000, MemberIDs: []uuid.UUID{a}},
+		{Name: "gyoza", Amount: 30000, MemberIDs: []uuid.UUID{c, a, b}},
+	}
+	got, err := SplitItems(100000, items, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ramen gets 66667 (first part absorbs the remainder), gyoza 33333 -> 11111 each.
+	want := []Share{{a, 66667 + 11111}, {b, 11111}, {c, 11111}}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	var sum int64
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("share %d = %+v, want %+v", i, got[i], want[i])
+		}
+		sum += got[i].AmountBase
+	}
+	if sum != 100000 {
+		t.Errorf("shares sum to %d", sum)
+	}
+}
+
+func TestSplitItemsAlwaysExact(t *testing.T) {
+	ids := []uuid.UUID{uuid.New(), uuid.New(), uuid.New(), uuid.New()}
+	order := map[uuid.UUID]int{}
+	for i, id := range ids {
+		order[id] = i
+	}
+	for total := int64(1); total < 400; total += 7 {
+		items := []Item{
+			{Amount: 333, MemberIDs: ids[:3]},
+			{Amount: 101, MemberIDs: ids[1:]},
+			{Amount: 7, MemberIDs: ids[2:3]},
+		}
+		got, err := SplitItems(total, items, order)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sum int64
+		for _, s := range got {
+			sum += s.AmountBase
+		}
+		if sum != total {
+			t.Fatalf("total %d: shares sum to %d", total, sum)
+		}
 	}
 }

@@ -3,11 +3,15 @@ package http
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/raisin/travel-split/backend/internal/auth"
 	"github.com/raisin/travel-split/backend/internal/expense"
 	"github.com/raisin/travel-split/backend/internal/settlement"
 	"github.com/raisin/travel-split/backend/internal/testdb"
@@ -15,20 +19,60 @@ import (
 )
 
 type apiClient struct {
-	t  *testing.T
-	h  http.Handler
-	me string // device token sent as X-Device-Token
+	t     *testing.T
+	h     http.Handler
+	me    string // session token sent as the session cookie
+	users int
 }
 
-func newAPI(t *testing.T) *apiClient {
-	pool := testdb.New(t)
-	h := NewServer(Deps{
+// testDeps is a server with mock sign-in, as in local dev.
+func testDeps(pool *pgxpool.Pool) Deps {
+	return Deps{
 		DB:          pool,
+		Auth:        auth.NewService(pool),
+		AuthCfg:     AuthConfig{Provider: "mock", PublicURL: "http://localhost:5173"},
 		Trips:       trip.NewService(pool),
-		Expenses:    expense.NewService(pool),
+		Expenses:    expense.NewService(pool, nil),
 		Settlements: settlement.NewService(pool),
-	}).Routes()
-	return &apiClient{t: t, h: h}
+	}
+}
+
+func newAPI(t *testing.T) *apiClient { return newAPIWithRates(t, nil) }
+
+func newAPIWithRates(t *testing.T, rater expense.Rater) *apiClient {
+	pool := testdb.New(t)
+	d := testDeps(pool)
+	d.Expenses = expense.NewService(pool, rater)
+	return &apiClient{t: t, h: NewServer(d).Routes()}
+}
+
+// authorize adds what the app sends on every request: the session cookie
+// and the anti-CSRF header.
+func (c *apiClient) authorize(req *http.Request, session string) {
+	req.Header.Set(CSRFHeader, CSRFValue)
+	if session != "" {
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+	}
+}
+
+// login signs a brand-new user in (mock provider) and returns their session.
+func (c *apiClient) login(name string) string {
+	c.t.Helper()
+	c.users++
+	req := httptest.NewRequest("POST", "/api/v1/auth/mock", strings.NewReader(fmt.Sprintf(`{"name":%q}`, fmt.Sprintf("%s #%d", name, c.users))))
+	c.authorize(req, "")
+	rec := httptest.NewRecorder()
+	c.h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		c.t.Fatalf("mock login: %d %s", rec.Code, rec.Body)
+	}
+	for _, ck := range rec.Result().Cookies() {
+		if ck.Name == sessionCookie && ck.Value != "" {
+			return ck.Value
+		}
+	}
+	c.t.Fatal("mock login set no session cookie")
+	return ""
 }
 
 // do sends a request and decodes the JSON response into out (if non-nil).
@@ -41,9 +85,7 @@ func (c *apiClient) do(method, path string, body any, wantStatus int, out any) {
 		}
 	}
 	req := httptest.NewRequest(method, "/api/v1"+path, &buf)
-	if c.me != "" {
-		req.Header.Set(TokenHeader, c.me)
-	}
+	c.authorize(req, c.me)
 	rec := httptest.NewRecorder()
 	c.h.ServeHTTP(rec, req)
 	if rec.Code != wantStatus {
@@ -75,32 +117,34 @@ type memberResp struct {
 	Name string `json:"name"`
 }
 
-// newTrip creates a trip; the returned token belongs to the owner.
+// newTrip signs in a new user, who creates a trip and stays signed in (c.me);
+// the returned session belongs to the owner.
 func (c *apiClient) newTrip(name, creator string) (tripResp, memberResp, string) {
 	c.t.Helper()
+	c.me = c.login(creator)
 	var out struct {
 		Trip   tripResp   `json:"trip"`
 		Member memberResp `json:"member"`
-		Token  string     `json:"token"`
 	}
 	c.do("POST", "/trips", map[string]any{"name": name, "creator_name": creator}, 201, &out)
-	return out.Trip, out.Member, out.Token
+	return out.Trip, out.Member, c.me
 }
 
-// join files a join request and returns the new device's token and request id.
+// join signs in a new user who files a join request; returns their session
+// and the request id. c.me is left as it was.
 func (c *apiClient) join(tripID string, body map[string]any) (string, string) {
 	c.t.Helper()
 	var out struct {
-		Token   string `json:"token"`
 		Request struct {
 			ID string `json:"id"`
 		} `json:"request"`
 	}
 	saved := c.me
-	c.me = ""
+	c.me = c.login("joiner")
+	session := c.me
 	c.do("POST", "/trips/"+tripID+"/join", body, 201, &out)
 	c.me = saved
-	return out.Token, out.Request.ID
+	return session, out.Request.ID
 }
 
 // addMember joins and gets approved by ownerToken; returns the member and its token.
@@ -119,7 +163,7 @@ func TestCreateTripAndInvite(t *testing.T) {
 	c := newAPI(t)
 
 	tr, owner, token := c.newTrip("ญี่ปุ่น 2026", "แบงก์")
-	if tr.BaseCurrency != "THB" || len(tr.InviteCode) != 10 || tr.OwnerMemberID == nil || *tr.OwnerMemberID != owner.ID || len(token) < 40 {
+	if tr.BaseCurrency != "THB" || len(tr.InviteCode) != 10 || tr.OwnerMemberID == nil || *tr.OwnerMemberID != owner.ID || len(token) < 40 || c.me != token {
 		t.Fatalf("trip %+v owner %+v token %q", tr, owner, token)
 	}
 
@@ -137,7 +181,7 @@ func TestCreateTripAndInvite(t *testing.T) {
 	if code := c.errCode("GET", "/trips/NOPE", nil, 404); code != "trip_not_found" {
 		t.Fatal(code)
 	}
-	for _, body := range []map[string]any{{"name": " ", "creator_name": "a"}, {"name": "x", "creator_name": ""}} {
+	for _, body := range []map[string]any{{"name": " ", "creator_name": "a"}, {"name": "x", "creator_name": strings.Repeat("ก", 51)}} {
 		if code := c.errCode("POST", "/trips", body, 400); code != "invalid_name" {
 			t.Fatal(code)
 		}
@@ -160,6 +204,12 @@ func TestJoinNeedsOwnerApproval(t *testing.T) {
 	if me["status"] != "pending" || me["member"] != nil {
 		t.Fatalf("pending me %+v", me)
 	}
+	// Their trip list shows the trip as waiting (no member yet).
+	var mine []map[string]any
+	c.do("GET", "/me/trips", nil, 200, &mine)
+	if len(mine) != 1 || mine[0]["status"] != "pending" || mine[0]["member_name"] != nil || mine[0]["is_owner"] != false {
+		t.Fatalf("pending trip list %+v", mine)
+	}
 	for _, path := range []string{"/members", "/expenses", "/balances", "/settlement"} {
 		if code := c.errCode("GET", base+path, nil, 403); code != "pending_approval" {
 			t.Fatalf("%s: %s", path, code)
@@ -171,9 +221,14 @@ func TestJoinNeedsOwnerApproval(t *testing.T) {
 
 	// Claiming an existing member also needs approval; names must be unique.
 	if code := func() string {
-		c.me = ""
+		c.me = c.login("someone")
 		return c.errCode("POST", base+"/join", map[string]any{"name": " แบงก์ "}, 409)
 	}(); code != "member_name_taken" {
+		t.Fatal(code)
+	}
+	// Asking twice is refused while the first request is open.
+	c.me = strangerToken
+	if code := c.errCode("POST", base+"/join", map[string]any{"name": "ฝน2"}, 409); code != "already_requested" {
 		t.Fatal(code)
 	}
 	impostorToken, impostorReq := c.join(tr.ID, map[string]any{"member_id": owner.ID})
@@ -214,22 +269,33 @@ func TestJoinNeedsOwnerApproval(t *testing.T) {
 	if code := c.errCode("GET", base+"/expenses", nil, 403); code != "join_rejected" {
 		t.Fatal(code)
 	}
-}
-
-func TestTokenIsCheckedPerTrip(t *testing.T) {
-	c := newAPI(t)
-	t1, _, _ := c.newTrip("A", "a")
-	_, _, otherToken := c.newTrip("B", "b")
-
-	path := "/trips/" + t1.ID + "/expenses"
-	if code := c.errCode("GET", path, nil, 401); code != "token_required" {
+	// A turned-down user may ask again (as a new name); a member may not.
+	c.do("POST", base+"/join", map[string]any{"name": "มิ้นท์"}, 201, nil)
+	c.do("GET", base+"/me", nil, 200, &me)
+	if me["status"] != "pending" {
+		t.Fatalf("re-request %+v", me)
+	}
+	c.me = strangerToken
+	if code := c.errCode("POST", base+"/join", map[string]any{"name": "x"}, 409); code != "already_member" {
 		t.Fatal(code)
 	}
-	for _, tok := range []string{"garbage", otherToken} {
-		c.me = tok
-		if code := c.errCode("GET", path, nil, 403); code != "not_a_member" {
-			t.Fatalf("%q: %s", tok, code)
+}
+
+func TestAccessIsCheckedPerTrip(t *testing.T) {
+	c := newAPI(t)
+	t1, _, _ := c.newTrip("A", "a")
+	_, _, otherSession := c.newTrip("B", "b")
+
+	path := "/trips/" + t1.ID + "/expenses"
+	for _, s := range []string{"", "garbage"} {
+		c.me = s
+		if code := c.errCode("GET", path, nil, 401); code != "login_required" {
+			t.Fatalf("%q: %s", s, code)
 		}
+	}
+	c.me = otherSession
+	if code := c.errCode("GET", path, nil, 403); code != "not_a_member" {
+		t.Fatal(code)
 	}
 }
 
@@ -260,7 +326,7 @@ func TestExpensesBalancesAndSettlement(t *testing.T) {
 		"title": "ข้าวเย็น", "category": "food", "paid_by": ids["A"], "amount": 10000,
 		"split_type": "equal", "member_ids": []string{ids["C"], ids["B"], ids["A"]},
 	}, 201, &dinner)
-	if dinner.AmountBase != 10000 || dinner.FxRate != "1.00000000" || dinner.CreatedBy != ids["B"] {
+	if dinner.AmountBase != 10000 || dinner.FxRate != "1" || dinner.CreatedBy != ids["B"] {
 		t.Fatalf("dinner %+v", dinner)
 	}
 	shares := map[string]int64{}
@@ -288,7 +354,9 @@ func TestExpensesBalancesAndSettlement(t *testing.T) {
 		{map[string]any{"title": "x", "category": "food", "paid_by": ids["A"], "amount": 100, "split_type": "exact",
 			"shares": []map[string]any{{"member_id": ids["A"], "amount": 99}}}, "split_mismatch"},
 		{map[string]any{"title": "x", "category": "food", "paid_by": ids["A"], "amount": 100, "currency": "JPY",
-			"split_type": "equal", "member_ids": []string{ids["A"]}}, "unsupported_currency"},
+			"split_type": "equal", "member_ids": []string{ids["A"]}}, "fx_unavailable"}, // no rate source configured
+		{map[string]any{"title": "x", "category": "food", "paid_by": ids["A"], "amount": 100, "currency": "ZZZ",
+			"split_type": "equal", "member_ids": []string{ids["A"]}}, "invalid_currency"},
 		{map[string]any{"title": "x", "category": "nope", "paid_by": ids["A"], "amount": 100,
 			"split_type": "equal", "member_ids": []string{ids["A"]}}, "invalid_category"},
 		{map[string]any{"title": "x", "category": "food", "paid_by": ids["A"], "amount": 0,

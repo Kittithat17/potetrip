@@ -4,7 +4,6 @@ import { I18nProvider } from '../../i18n/I18nProvider'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { setIdentity } from '../../lib/identity'
 import { ScanPage } from './ScanPage'
 import { TripLayout } from './TripLayout'
 
@@ -26,7 +25,6 @@ let posted: Record<string, unknown>[] = []
 
 beforeEach(() => {
   localStorage.clear()
-  setIdentity('t1', { token: 'tok', memberId: 'm1' })
   posted = []
   let uploads = 0
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

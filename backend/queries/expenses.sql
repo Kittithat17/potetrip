@@ -51,3 +51,27 @@ VALUES ($1, $2, $3);
 
 -- name: DeleteShares :exec
 DELETE FROM expense_shares WHERE expense_id = $1;
+
+-- name: CreateItem :exec
+INSERT INTO expense_items (expense_id, position, name, amount, member_ids)
+VALUES ($1, $2, $3, $4, $5);
+
+-- name: DeleteItems :exec
+DELETE FROM expense_items WHERE expense_id = $1;
+
+-- name: ListItemsForExpenses :many
+SELECT * FROM expense_items
+WHERE expense_id = ANY(sqlc.arg(expense_ids)::uuid[])
+ORDER BY expense_id, position;
+
+-- name: SummaryByCategory :many
+SELECT category, SUM(amount_base)::bigint AS amount_base, COUNT(*)::int AS count
+FROM expenses WHERE trip_id = $1
+GROUP BY category
+ORDER BY amount_base DESC;
+
+-- name: SummaryByCurrency :many
+SELECT currency, SUM(amount)::bigint AS amount, SUM(amount_base)::bigint AS amount_base, COUNT(*)::int AS count
+FROM expenses WHERE trip_id = $1
+GROUP BY currency
+ORDER BY amount_base DESC;

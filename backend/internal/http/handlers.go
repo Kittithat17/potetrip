@@ -27,7 +27,11 @@ func (s *Server) createTrip(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	out, err := s.Trips.Create(r.Context(), req.Name, req.BaseCurrency, req.CreatorName, req.PromptPay)
+	u := userFrom(r.Context())
+	if strings.TrimSpace(req.CreatorName) == "" {
+		req.CreatorName = u.Name
+	}
+	out, err := s.Trips.Create(r.Context(), u.ID, req.Name, req.BaseCurrency, req.CreatorName, req.PromptPay)
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -70,15 +74,19 @@ func (s *Server) requestJoin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	token, d, err := s.Trips.RequestJoin(r.Context(), tripFrom(r.Context()).ID, req.Name, req.MemberID, req.PromptPay)
+	u := userFrom(r.Context())
+	if req.MemberID == nil && strings.TrimSpace(req.Name) == "" {
+		req.Name = u.Name
+	}
+	d, err := s.Trips.RequestJoin(r.Context(), u.ID, tripFrom(r.Context()).ID, req.Name, req.MemberID, req.PromptPay)
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"token": token, "request": requestView(d)})
+	writeJSON(w, http.StatusCreated, map[string]any{"request": requestView(d)})
 }
 
-// me tells a device where it stands: pending, rejected, or approved (with its member).
+// me tells the user where they stand in the trip: pending, rejected, or approved (with its member).
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	d, t := deviceFrom(ctx), tripFrom(ctx)
@@ -93,6 +101,15 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		out["is_owner"] = t.OwnerMemberID != nil && *t.OwnerMemberID == m.ID
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// leave drops the user's membership or cancels their pending request.
+func (s *Server) leave(w http.ResponseWriter, r *http.Request) {
+	if err := s.Trips.Leave(r.Context(), tripFrom(r.Context()), deviceFrom(r.Context())); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) updateTrip(w http.ResponseWriter, r *http.Request) {
@@ -301,4 +318,53 @@ func (s *Server) markPaid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
+}
+
+func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	t := tripFrom(ctx)
+	sum, err := s.Expenses.Summary(ctx, t.ID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	bs, err := s.Settlements.Balances(ctx, t.ID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	type memberRow struct {
+		MemberID uuid.UUID `json:"member_id"`
+		Paid     int64     `json:"paid"`     // what they paid for the group
+		Consumed int64     `json:"consumed"` // their own share of the spending
+	}
+	members := make([]memberRow, len(bs))
+	for i, b := range bs {
+		members[i] = memberRow{MemberID: b.MemberID, Paid: b.Paid, Consumed: b.Owed}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"currency":    t.BaseCurrency,
+		"total":       sum.Total,
+		"count":       sum.Count,
+		"by_category": sum.ByCategory,
+		"by_currency": sum.ByCurrency,
+		"by_member":   members,
+	})
+}
+
+// updateMe lets a member edit their own details (currently PromptPay only).
+func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PromptPay *string `json:"promptpay"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	m, err := s.Trips.UpdatePromptPay(r.Context(), tripFrom(r.Context()).ID, memberFrom(r.Context()).ID, req.PromptPay)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
 }

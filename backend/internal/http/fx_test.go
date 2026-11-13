@@ -29,7 +29,13 @@ func (p *stubFX) Currencies(context.Context) ([]string, error) { return []string
 func TestFXEndpoints(t *testing.T) {
 	pool := testdb.New(t)
 	p := &stubFX{}
-	c := &apiClient{t: t, h: NewServer(Deps{DB: pool, FX: fx.NewService(p, db.New(pool))}).Routes()}
+	d := testDeps(pool)
+	d.FX = fx.NewService(p, db.New(pool))
+	c := &apiClient{t: t, h: NewServer(d).Routes()}
+	if code := c.errCode("GET", "/fx?from=cny&to=THB", nil, 401); code != "login_required" {
+		t.Fatal(code)
+	}
+	c.me = c.login("fx")
 
 	var q fx.Quote
 	c.do("GET", "/fx?from=cny&to=THB", nil, 200, &q)

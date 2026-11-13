@@ -1,10 +1,19 @@
 -- name: CreateDevice :one
-INSERT INTO devices (trip_id, token_hash, status, member_id, requested_name, requested_member_id, promptpay)
+INSERT INTO devices (trip_id, user_id, status, member_id, requested_name, requested_member_id, promptpay)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
--- name: GetDeviceByToken :one
-SELECT * FROM devices WHERE token_hash = $1;
+-- name: GetDeviceForUser :one
+SELECT * FROM devices WHERE trip_id = $1 AND user_id = $2;
+
+-- name: DeleteRejectedDevice :exec
+DELETE FROM devices WHERE trip_id = $1 AND user_id = $2 AND status = 'rejected';
+
+-- name: ClaimDevice :one
+-- Moves a pre-login device token onto the signed-in user, then forgets the token.
+UPDATE devices SET user_id = $2, token_hash = NULL
+WHERE token_hash = $1 AND user_id IS NULL
+RETURNING *;
 
 -- name: GetDevice :one
 SELECT * FROM devices WHERE id = $1 AND trip_id = $2;
@@ -29,3 +38,6 @@ RETURNING *;
 
 -- name: SetTripOwner :exec
 UPDATE trips SET owner_member_id = $2 WHERE id = $1;
+
+-- name: DeleteDeviceForUser :exec
+DELETE FROM devices WHERE trip_id = $1 AND user_id = $2;

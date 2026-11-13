@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -12,9 +11,6 @@ import (
 	"github.com/raisin/travel-split/backend/internal/db"
 	"github.com/raisin/travel-split/backend/internal/trip"
 )
-
-// TokenHeader carries the device's secret token for the trip in the URL.
-const TokenHeader = "X-Device-Token"
 
 type ctxKey int
 
@@ -48,15 +44,10 @@ func (s *Server) loadTrip(next http.Handler) http.Handler {
 	})
 }
 
-// requireDevice accepts any device registered to this trip, approved or not.
+// requireDevice accepts a user who is in this trip or has asked to join it.
 func (s *Server) requireDevice(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := strings.TrimSpace(r.Header.Get(TokenHeader))
-		if token == "" {
-			writeErr(w, r, apperr.Unauthorized("token_required", "ต้องเข้าร่วมทริปก่อน"))
-			return
-		}
-		d, err := s.Trips.Device(r.Context(), tripFrom(r.Context()).ID, token)
+		d, err := s.Trips.DeviceForUser(r.Context(), tripFrom(r.Context()).ID, userFrom(r.Context()).ID)
 		if err != nil {
 			writeErr(w, r, err)
 			return
@@ -65,7 +56,7 @@ func (s *Server) requireDevice(next http.Handler) http.Handler {
 	})
 }
 
-// requireMember lets only approved devices through, as their member.
+// requireMember lets only approved users through, as their member.
 func (s *Server) requireMember(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d := deviceFrom(r.Context())

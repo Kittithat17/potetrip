@@ -17,6 +17,7 @@ import (
 
 	"github.com/raisin/travel-split/backend/internal/apperr"
 	"github.com/raisin/travel-split/backend/internal/db"
+	"github.com/raisin/travel-split/backend/internal/fx"
 	"github.com/raisin/travel-split/backend/internal/money"
 )
 
@@ -25,7 +26,9 @@ const (
 	SplitExactType = "exact"
 	SplitItemsType = "items"
 
-	maxTitle = 200
+	maxTitle    = 200
+	maxItems    = 100
+	maxItemName = 100
 )
 
 var Categories = []string{"food", "transport", "lodging", "shopping", "activity", "other"}
@@ -46,6 +49,24 @@ type Input struct {
 	// SlipID links a parsed slip the user just reviewed (create only).
 	// Each slip can back at most one expense.
 	SlipID *uuid.UUID `json:"slip_id"`
+	// FxRate overrides the looked-up rate (units of base per 1 Currency),
+	// e.g. the rate the money changer actually gave. Ignored for the base currency.
+	FxRate *string `json:"fx_rate"`
+	// Items are receipt lines for split_type=items, in Currency minor units.
+	Items []ItemInput `json:"items"`
+}
+
+// ItemInput is one receipt line and who shared it.
+type ItemInput struct {
+	Name      string      `json:"name"`
+	Amount    int64       `json:"amount"`
+	MemberIDs []uuid.UUID `json:"member_ids"`
+}
+
+type Item struct {
+	Name      string      `json:"name"`
+	Amount    int64       `json:"amount"`
+	MemberIDs []uuid.UUID `json:"member_ids"`
 }
 
 // ShareInput is one member's portion for split_type=exact, in Currency minor units.
@@ -76,6 +97,7 @@ type View struct {
 	CreatedBy  uuid.UUID  `json:"created_by"`
 	CreatedAt  time.Time  `json:"created_at"`
 	Shares     []Share    `json:"shares"`
+	Items      []Item     `json:"items"`
 }
 
 type Filter struct {
@@ -83,14 +105,20 @@ type Filter struct {
 	MemberID *uuid.UUID
 }
 
-type Service struct {
-	pool *pgxpool.Pool
-	q    *db.Queries
-	now  func() time.Time
+// Rater looks up exchange rates; *fx.Service implements it.
+type Rater interface {
+	Rate(ctx context.Context, from, to string, date *time.Time) (fx.Quote, error)
 }
 
-func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool, q: db.New(pool), now: time.Now}
+type Service struct {
+	pool  *pgxpool.Pool
+	q     *db.Queries
+	rater Rater // nil: only the base currency is accepted
+	now   func() time.Time
+}
+
+func NewService(pool *pgxpool.Pool, rater Rater) *Service {
+	return &Service{pool: pool, q: db.New(pool), rater: rater, now: time.Now}
 }
 
 // prepared is a validated Input ready to be written.
@@ -99,6 +127,7 @@ type prepared struct {
 	fxRate     pgtype.Numeric
 	amountBase int64
 	shares     []Share
+	items      []Item
 }
 
 func (s *Service) Create(ctx context.Context, trip db.Trip, createdBy uuid.UUID, in Input) (View, error) {
@@ -109,7 +138,7 @@ func (s *Service) Create(ctx context.Context, trip db.Trip, createdBy uuid.UUID,
 	var out View
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if err := checkCurrency(ctx, q, trip.ID, p.in.Currency); err != nil {
+		if err := checkCurrency(ctx, q, trip.ID, trip.BaseCurrency); err != nil {
 			return err
 		}
 		if p.in.SlipID != nil {
@@ -141,7 +170,10 @@ func (s *Service) Create(ctx context.Context, trip db.Trip, createdBy uuid.UUID,
 		if err := insertShares(ctx, q, e.ID, p.shares); err != nil {
 			return err
 		}
-		out = toView(e, p.shares)
+		if err := insertItems(ctx, q, e.ID, p.items); err != nil {
+			return err
+		}
+		out = toView(e, p.shares, p.items)
 		return nil
 	})
 	return out, err
@@ -155,7 +187,7 @@ func (s *Service) Update(ctx context.Context, trip db.Trip, id uuid.UUID, in Inp
 	var out View
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		if err := checkCurrency(ctx, q, trip.ID, p.in.Currency); err != nil {
+		if err := checkCurrency(ctx, q, trip.ID, trip.BaseCurrency); err != nil {
 			return err
 		}
 		e, err := q.UpdateExpense(ctx, db.UpdateExpenseParams{
@@ -180,10 +212,16 @@ func (s *Service) Update(ctx context.Context, trip db.Trip, id uuid.UUID, in Inp
 		if err := q.DeleteShares(ctx, e.ID); err != nil {
 			return err
 		}
+		if err := q.DeleteItems(ctx, e.ID); err != nil {
+			return err
+		}
 		if err := insertShares(ctx, q, e.ID, p.shares); err != nil {
 			return err
 		}
-		out = toView(e, p.shares)
+		if err := insertItems(ctx, q, e.ID, p.items); err != nil {
+			return err
+		}
+		out = toView(e, p.shares, p.items)
 		return nil
 	})
 	return out, err
@@ -226,6 +264,31 @@ func (s *Service) List(ctx context.Context, tripID uuid.UUID, f Filter) ([]View,
 	return s.withShares(ctx, rows)
 }
 
+// Summary totals a trip's spending by category and by original currency.
+type Summary struct {
+	Total      int64                     `json:"total"`
+	Count      int                       `json:"count"`
+	ByCategory []db.SummaryByCategoryRow `json:"by_category"`
+	ByCurrency []db.SummaryByCurrencyRow `json:"by_currency"`
+}
+
+func (s *Service) Summary(ctx context.Context, tripID uuid.UUID) (Summary, error) {
+	cats, err := s.q.SummaryByCategory(ctx, tripID)
+	if err != nil {
+		return Summary{}, err
+	}
+	curs, err := s.q.SummaryByCurrency(ctx, tripID)
+	if err != nil {
+		return Summary{}, err
+	}
+	out := Summary{ByCategory: cats, ByCurrency: curs}
+	for _, c := range cats {
+		out.Total += c.AmountBase
+		out.Count += int(c.Count)
+	}
+	return out, nil
+}
+
 func (s *Service) withShares(ctx context.Context, rows []db.Expense) ([]View, error) {
 	ids := make([]uuid.UUID, len(rows))
 	for i, e := range rows {
@@ -239,9 +302,17 @@ func (s *Service) withShares(ctx context.Context, rows []db.Expense) ([]View, er
 	for _, r := range shareRows {
 		byExpense[r.ExpenseID] = append(byExpense[r.ExpenseID], Share{MemberID: r.MemberID, AmountBase: r.AmountBase})
 	}
+	itemRows, err := s.q.ListItemsForExpenses(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	items := map[uuid.UUID][]Item{}
+	for _, r := range itemRows {
+		items[r.ExpenseID] = append(items[r.ExpenseID], Item{Name: r.Name, Amount: r.Amount, MemberIDs: r.MemberIds})
+	}
 	out := make([]View, len(rows))
 	for i, e := range rows {
-		out[i] = toView(e, byExpense[e.ID])
+		out[i] = toView(e, byExpense[e.ID], items[e.ID])
 	}
 	return out, nil
 }
@@ -261,13 +332,28 @@ func (s *Service) prepare(ctx context.Context, trip db.Trip, in Input) (prepared
 	if in.Currency == "" {
 		in.Currency = trip.BaseCurrency
 	}
-	// Multi-currency arrives in M4; until then only the base currency is accepted.
-	if in.Currency != trip.BaseCurrency {
-		return prepared{}, apperr.Invalid("unsupported_currency", "ตอนนี้รองรับเฉพาะสกุลเงินหลักของทริป ("+trip.BaseCurrency+")")
+	if !money.Supported(in.Currency) {
+		return prepared{}, apperr.Invalid("invalid_currency", "ไม่รองรับสกุลเงินนี้")
 	}
 	if in.SpentAt == nil || in.SpentAt.IsZero() {
 		now := s.now()
 		in.SpentAt = &now
+	}
+
+	rate, err := s.rate(ctx, in, trip.BaseCurrency)
+	if err != nil {
+		return prepared{}, err
+	}
+	amountBase, err := money.Convert(in.Amount, in.Currency, trip.BaseCurrency, rate)
+	if err != nil {
+		return prepared{}, apperr.Invalid("invalid_amount", "จำนวนเงินมากเกินไป")
+	}
+	if amountBase <= 0 {
+		return prepared{}, apperr.Invalid("amount_too_small", "ยอดนี้แปลงเป็นสกุลหลักแล้วน้อยกว่า 1 หน่วย")
+	}
+	var fxRate pgtype.Numeric
+	if err := fxRate.Scan(money.RateString(rate)); err != nil {
+		return prepared{}, err
 	}
 
 	members, err := s.q.ListMembers(ctx, trip.ID)
@@ -282,20 +368,77 @@ func (s *Service) prepare(ctx context.Context, trip db.Trip, in Input) (prepared
 		return prepared{}, apperr.Invalid("invalid_paid_by", "ผู้จ่ายไม่ได้อยู่ในทริปนี้")
 	}
 
-	fxRate := pgtype.Numeric{Int: big.NewInt(1), Exp: 0, Valid: true}
-	amountBase := in.Amount
-
-	shares, err := computeShares(in, amountBase, order)
+	var items []Item
+	if in.SplitType == SplitItemsType {
+		if items, err = cleanItems(in.Items, order); err != nil {
+			return prepared{}, err
+		}
+	}
+	shares, err := computeShares(in, amountBase, items, order)
 	if err != nil {
 		return prepared{}, err
 	}
-	return prepared{in: in, fxRate: fxRate, amountBase: amountBase, shares: shares}, nil
+	return prepared{in: in, fxRate: fxRate, amountBase: amountBase, shares: shares, items: items}, nil
+}
+
+// rate picks the conversion rate: 1 for the base currency, the user's own
+// rate if given, otherwise the reference rate for the day of the expense.
+func (s *Service) rate(ctx context.Context, in Input, base string) (*big.Rat, error) {
+	if in.Currency == base {
+		return big.NewRat(1, 1), nil
+	}
+	if in.FxRate != nil && strings.TrimSpace(*in.FxRate) != "" {
+		r, err := money.ParseRate(*in.FxRate)
+		if err != nil {
+			return nil, apperr.Invalid("invalid_fx_rate", "อัตราแลกเปลี่ยนต้องเป็นตัวเลขมากกว่า 0 ทศนิยมไม่เกิน 8 ตำแหน่ง")
+		}
+		return r, nil
+	}
+	if s.rater == nil {
+		return nil, apperr.Invalid("fx_unavailable", "ดึงอัตราแลกเปลี่ยนไม่ได้ ใส่เรตเองได้")
+	}
+	day := *in.SpentAt
+	if now := s.now(); day.After(now) {
+		day = now // no rates exist for the future
+	}
+	q, err := s.rater.Rate(ctx, in.Currency, base, &day)
+	if err != nil {
+		return nil, err
+	}
+	return money.NormalizeRate(q.Rate)
+}
+
+// cleanItems validates receipt lines and dedupes their members.
+func cleanItems(in []ItemInput, order map[uuid.UUID]int) ([]Item, error) {
+	if len(in) == 0 || len(in) > maxItems {
+		return nil, apperr.Invalid("invalid_items", "ต้องมีรายการ 1–100 รายการ")
+	}
+	out := make([]Item, len(in))
+	for i, it := range in {
+		name := strings.TrimSpace(it.Name)
+		if name == "" || utf8.RuneCountInString(name) > maxItemName {
+			return nil, apperr.Invalid("invalid_items", "ชื่อรายการต้องมี 1–100 ตัวอักษร")
+		}
+		if it.Amount <= 0 {
+			return nil, apperr.Invalid("invalid_items", "ราคาของแต่ละรายการต้องมากกว่า 0")
+		}
+		ids, err := uniqueMembers(it.MemberIDs, order)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			return nil, apperr.Invalid("item_no_members", "ทุกรายการต้องมีคนกินอย่างน้อย 1 คน")
+		}
+		slices.SortFunc(ids, func(a, b uuid.UUID) int { return order[a] - order[b] })
+		out[i] = Item{Name: name, Amount: it.Amount, MemberIDs: ids}
+	}
+	return out, nil
 }
 
 // computeShares turns the split request into base-currency shares that sum
 // exactly to amountBase. Members are processed in trip order so remainder
 // distribution is stable regardless of request order.
-func computeShares(in Input, amountBase int64, order map[uuid.UUID]int) ([]Share, error) {
+func computeShares(in Input, amountBase int64, items []Item, order map[uuid.UUID]int) ([]Share, error) {
 	byOrder := func(a, b uuid.UUID) int { return order[a] - order[b] }
 
 	switch in.SplitType {
@@ -354,14 +497,14 @@ func computeShares(in Input, amountBase int64, order map[uuid.UUID]int) ([]Share
 		return zip(kept, parts), nil
 
 	case SplitItemsType:
-		return nil, apperr.Invalid("unsupported_split", "การหารแบบรายเมนูจะมาในเวอร์ชันถัดไป")
+		return SplitItems(amountBase, items, order)
 	default:
 		return nil, apperr.Invalid("invalid_split", "วิธีหารไม่ถูกต้อง")
 	}
 }
 
 // checkCurrency locks the trip row for share and confirms its base currency
-// still matches what the expense was validated against.
+// still matches the one amount_base was converted into.
 func checkCurrency(ctx context.Context, q *db.Queries, tripID uuid.UUID, currency string) error {
 	cur, err := q.TripCurrencyForShare(ctx, tripID)
 	if err != nil {
@@ -407,15 +550,27 @@ func insertShares(ctx context.Context, q *db.Queries, expenseID uuid.UUID, share
 	return nil
 }
 
-func toView(e db.Expense, shares []Share) View {
+func insertItems(ctx context.Context, q *db.Queries, expenseID uuid.UUID, items []Item) error {
+	for i, it := range items {
+		if err := q.CreateItem(ctx, db.CreateItemParams{ExpenseID: expenseID, Position: int32(i), Name: it.Name, Amount: it.Amount, MemberIds: it.MemberIDs}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func toView(e db.Expense, shares []Share, items []Item) View {
 	if shares == nil {
 		shares = []Share{}
+	}
+	if items == nil {
+		items = []Item{}
 	}
 	return View{
 		ID: e.ID, TripID: e.TripID, Title: e.Title, Category: e.Category, PaidBy: e.PaidBy,
 		Amount: e.Amount, Currency: e.Currency, FxRate: numericString(e.FxRate), AmountBase: e.AmountBase,
 		SplitType: e.SplitType, SpentAt: e.SpentAt, SlipID: e.SlipID, CreatedBy: e.CreatedBy,
-		CreatedAt: e.CreatedAt, Shares: shares,
+		CreatedAt: e.CreatedAt, Shares: shares, Items: items,
 	}
 }
 
@@ -425,5 +580,9 @@ func numericString(n pgtype.Numeric) string {
 		return ""
 	}
 	s, _ := v.(string)
+	// numeric(18,8) comes back as "0.23450000"; show "0.2345".
+	if strings.Contains(s, ".") {
+		s = strings.TrimSuffix(strings.TrimRight(s, "0"), ".")
+	}
 	return s
 }

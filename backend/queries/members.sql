@@ -10,3 +10,8 @@ ORDER BY created_at, id;
 
 -- name: GetMember :one
 SELECT * FROM members WHERE id = $1;
+
+-- name: UpdateMemberPromptPay :one
+UPDATE members SET promptpay = $3
+WHERE id = $1 AND trip_id = $2
+RETURNING *;

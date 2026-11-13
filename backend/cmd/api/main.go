@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/raisin/travel-split/backend/internal/auth"
 	"github.com/raisin/travel-split/backend/internal/config"
 	"github.com/raisin/travel-split/backend/internal/db"
 	"github.com/raisin/travel-split/backend/internal/expense"
@@ -54,15 +55,27 @@ func run() error {
 		slips = slip.NewService(reader, db.New(pool), cfg.SlipConcurrency)
 	}
 
+	authCfg := apihttp.AuthConfig{Provider: cfg.AuthProvider, PublicURL: cfg.PublicURL}
+	switch cfg.AuthProvider {
+	case "google":
+		authCfg.Google = auth.NewGoogle(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.PublicURL+"/api/v1/auth/google/callback")
+		slog.Info("sign-in with Google", "redirect_url", cfg.PublicURL+"/api/v1/auth/google/callback")
+	case "mock":
+		slog.Warn("MOCK sign-in (AUTH_PROVIDER=mock): anyone can sign in as anyone; local dev only")
+	}
+
+	rates := fx.NewService(fx.NewFrankfurter(cfg.FXBaseURL), db.New(pool))
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: apihttp.NewServer(apihttp.Deps{
 			DB:          pool,
+			Auth:        auth.NewService(pool),
+			AuthCfg:     authCfg,
 			Trips:       trip.NewService(pool),
-			Expenses:    expense.NewService(pool),
+			Expenses:    expense.NewService(pool, rates),
 			Settlements: settlement.NewService(pool),
 			Slips:       slips,
-			FX:          fx.NewService(fx.NewFrankfurter(cfg.FXBaseURL), db.New(pool)),
+			FX:          rates,
 			CORSOrigins: cfg.CORSOrigins,
 		}).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,

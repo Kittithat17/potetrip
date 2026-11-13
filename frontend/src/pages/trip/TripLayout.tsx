@@ -1,71 +1,60 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftRight, HandCoins, House, ScanLine } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { Link, Outlet, useParams } from 'react-router'
+import { useMemo } from 'react'
+import { Link, Outlet, useNavigate, useParams } from 'react-router'
 import { ApiError } from '../../api/client'
-import { useMe, useMembers, useTripByInvite } from '../../api/hooks'
+import { leaveTrip } from '../../api/endpoints'
+import { keys, useMe, useMembers, useTripByInvite } from '../../api/hooks'
 import { ErrorText, Page, Spinner } from '../../components/ui'
-import { clearIdentity, getIdentity, setIdentity } from '../../lib/identity'
 import { settingsTab } from '../../lib/nav'
 import { useI18n } from '../../i18n/context'
-import { rememberTrip } from '../../lib/recentTrips'
 import type { TripCtx } from './context'
 import { JoinPage, WaitingPage } from './JoinPage'
 
 export function TripLayout() {
   const { t } = useI18n()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
   const code = (useParams().code ?? '').toUpperCase()
   const inviteQ = useTripByInvite(code)
   const trip = inviteQ.data?.trip
-  const [identity, setIdentityState] = useState(() => (trip ? getIdentity(trip.id) : null))
 
-  // Load the stored credential once the trip id is known.
-  useEffect(() => {
-    if (trip) setIdentityState(getIdentity(trip.id))
-  }, [trip])
-
-  const token = identity?.token
-  const meQ = useMe(trip?.id, token)
+  // Where the signed-in user stands in this trip (member, pending, or not in it).
+  const meQ = useMe(trip?.id)
+  const notInTrip = meQ.error instanceof ApiError && meQ.error.code === 'not_a_member'
   const approved = meQ.data?.status === 'approved' && meQ.data.member
-  const membersQ = useMembers(approved ? trip?.id : undefined, token)
+  const membersQ = useMembers(approved ? trip?.id : undefined)
   const me = meQ.data?.member ?? undefined
 
-  const forget = () => {
+  const refreshMe = async () => {
     if (!trip) return
-    clearIdentity(trip.id)
-    setIdentityState(null)
+    await qc.invalidateQueries({ queryKey: keys.trip(trip.id) })
+    await qc.invalidateQueries({ queryKey: keys.myTrips })
   }
 
-  // The token no longer works (e.g. the database was reset): start over.
-  const tokenRejected = meQ.error instanceof ApiError && (meQ.error.status === 401 || meQ.error.code === 'not_a_member')
-  useEffect(() => {
-    if (tokenRejected) forget()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenRejected])
-
-  // Remember the trip on this device, and cache "me" for list pages.
-  useEffect(() => {
-    if (!trip) return
-    rememberTrip({ id: trip.id, code: trip.invite_code, name: trip.name, myName: me?.name })
-    if (me && token && identity?.memberId !== me.id) {
-      const next = { token, memberId: me.id }
-      setIdentity(trip.id, next)
-      setIdentityState(next)
-    }
-  }, [trip, me, token, identity?.memberId])
+  const leave = useMutation({
+    mutationFn: () => leaveTrip(trip!.id),
+    onSuccess: async () => {
+      qc.removeQueries({ queryKey: keys.trip(trip!.id) })
+      await qc.invalidateQueries({ queryKey: keys.myTrips })
+    },
+  })
 
   const ctx = useMemo<TripCtx | null>(() => {
-    if (!trip || !me || !token || !membersQ.data) return null
+    if (!trip || !me || !membersQ.data) return null
     const names = new Map(membersQ.data.map((m) => [m.id, m.name]))
     const base = `/t/${trip.invite_code}`
     return {
       trip,
       members: membersQ.data,
       me,
-      token,
       isOwner: !!meQ.data?.is_owner,
       memberName: (id) => names.get(id) ?? '?',
       base,
-      leave: forget,
+      leave: async () => {
+        await leave.mutateAsync()
+        navigate('/trips', { replace: true })
+      },
       nav: [
         { to: base, labelKey: 'nav.overview', icon: House, end: true },
         { to: `${base}/scan`, labelKey: 'nav.scan', icon: ScanLine },
@@ -75,7 +64,7 @@ export function TripLayout() {
       ],
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trip, me, token, membersQ.data, meQ.data?.is_owner])
+  }, [trip, me, membersQ.data, meQ.data?.is_owner])
 
   if (inviteQ.isPending) {
     return (
@@ -99,20 +88,10 @@ export function TripLayout() {
     )
   }
 
-  if (!token) {
-    return (
-      <JoinPage
-        trip={trip}
-        members={inviteQ.data.members}
-        onRequested={(t) => {
-          const next = { token: t }
-          setIdentity(trip.id, next)
-          setIdentityState(next)
-        }}
-      />
-    )
+  if (notInTrip) {
+    return <JoinPage trip={trip} members={inviteQ.data.members} onRequested={refreshMe} />
   }
-  if (meQ.isPending || tokenRejected) {
+  if (meQ.isPending) {
     return (
       <Page>
         <Spinner />
@@ -129,7 +108,8 @@ export function TripLayout() {
     )
   }
   if (meQ.data.status !== 'approved') {
-    return <WaitingPage trip={trip} me={meQ.data} onCancel={forget} />
+    // Cancelling (or, after a rejection, clearing it to ask again) drops the request.
+    return <WaitingPage trip={trip} me={meQ.data} onCancel={() => leave.mutate(undefined, { onSuccess: refreshMe })} cancelling={leave.isPending} />
   }
   if (!ctx) {
     return membersQ.error ? (

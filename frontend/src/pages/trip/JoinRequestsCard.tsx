@@ -7,9 +7,9 @@ import { useTrip } from './context'
 /** Owner-only: people waiting to be let into the trip. Hidden when empty. */
 export function JoinRequestsCard() {
   const { t } = useI18n()
-  const { trip, token } = useTrip()
-  const q = useJoinRequests(trip.id, token, true)
-  const decide = useDecideJoin(trip.id, token)
+  const { trip } = useTrip()
+  const q = useJoinRequests(trip.id, true)
+  const decide = useDecideJoin(trip.id)
   const requests = q.data ?? []
   if (requests.length === 0) return null
 

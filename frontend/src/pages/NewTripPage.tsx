@@ -6,8 +6,8 @@ import { createTrip } from '../api/endpoints'
 import { AppFrame, BlueHeader, Sheet } from '../components/shell'
 import { Button, ErrorText, Field, inputClass, TextInput } from '../components/ui'
 import { useI18n } from '../i18n/context'
+import { useAuth } from '../auth/context'
 import { currencyName } from '../lib/currencyInfo'
-import { setIdentity } from '../lib/identity'
 import { CURRENCIES } from '../lib/money'
 
 export function NewTripPage() {
@@ -15,14 +15,11 @@ export function NewTripPage() {
   const navigate = useNavigate()
   const [tripName, setTripName] = useState('')
   const [currency, setCurrency] = useState('THB')
-  const [myName, setMyName] = useState('')
+  const { user } = useAuth()
+  const [myName, setMyName] = useState(user.name)
 
   const create = useMutation({
-    mutationFn: async () => {
-      const { trip, member, token } = await createTrip({ name: tripName, base_currency: currency, creator_name: myName })
-      setIdentity(trip.id, { token, memberId: member.id })
-      return trip
-    },
+    mutationFn: async () => (await createTrip({ name: tripName, base_currency: currency, creator_name: myName })).trip,
     onSuccess: (trip) => navigate(`/t/${trip.invite_code}`, { replace: true }),
   })
 

@@ -1,16 +1,16 @@
 // Package trip manages trips, members, and device access to a trip.
 //
-// Access model: each device holds a random secret token per trip (we store
-// only its SHA-256). The trip creator's device is approved at creation and
+// Access model: everyone is a signed-in user (see package auth). A user's
+// place in a trip is a devices row: the creator's is approved at creation and
 // that member becomes the owner. Anyone else with the invite code can only
-// file a join request; the device acts as a member after the owner approves.
+// file a join request, and acts as a member after the owner approves it.
+// Rows from before sign-in existed carry a per-device token instead of a
+// user until that device signs in and claims them.
 package trip
 
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"strings"
 	"unicode/utf8"
@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/raisin/travel-split/backend/internal/apperr"
+	"github.com/raisin/travel-split/backend/internal/auth"
 	"github.com/raisin/travel-split/backend/internal/db"
 	"github.com/raisin/travel-split/backend/internal/money"
 )
@@ -29,6 +30,7 @@ const (
 	maxTripName   = 100
 	maxMemberName = 50
 	maxPending    = 20 // open join requests per trip, to blunt spam
+	maxClaims     = 50 // legacy device tokens one request may claim
 	inviteLen     = 10
 	// No 0/O/1/I/L so codes are easy to read aloud and type.
 	inviteAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
@@ -41,7 +43,7 @@ const (
 var (
 	ErrTripNotFound    = apperr.NotFound("trip_not_found", "ไม่พบทริปนี้")
 	ErrMemberNotFound  = apperr.NotFound("member_not_found", "ไม่พบสมาชิกนี้")
-	ErrDeviceNotFound  = apperr.Forbidden("not_a_member", "เครื่องนี้ยังไม่ได้เข้าร่วมทริปนี้")
+	ErrDeviceNotFound  = apperr.Forbidden("not_a_member", "คุณยังไม่ได้เข้าร่วมทริปนี้")
 	ErrRequestNotFound = apperr.NotFound("request_not_found", "ไม่พบคำขอนี้ หรือมีการตัดสินใจไปแล้ว")
 	errNameTaken       = apperr.Conflict("member_name_taken", "มีคนชื่อนี้ในทริปแล้ว ถ้าเป็นคุณให้เลือกชื่อจากรายการ")
 )
@@ -57,11 +59,10 @@ func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool, q: db
 type Created struct {
 	Trip   db.Trip   `json:"trip"`
 	Member db.Member `json:"member"`
-	Token  string    `json:"token"`
 }
 
-// Create makes a trip, its owner member, and an approved device for the creator.
-func (s *Service) Create(ctx context.Context, name, baseCurrency, creatorName string, promptpay *string) (Created, error) {
+// Create makes a trip, its owner member, and the creator's approved membership.
+func (s *Service) Create(ctx context.Context, userID uuid.UUID, name, baseCurrency, creatorName string, promptpay *string) (Created, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || utf8.RuneCountInString(name) > maxTripName {
 		return Created{}, apperr.Invalid("invalid_name", "ชื่อทริปต้องมี 1–100 ตัวอักษร")
@@ -81,8 +82,6 @@ func (s *Service) Create(ctx context.Context, name, baseCurrency, creatorName st
 	if err != nil {
 		return Created{}, err
 	}
-	token, hash := newToken()
-
 	var out Created
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
@@ -106,11 +105,11 @@ func (s *Service) Create(ctx context.Context, name, baseCurrency, creatorName st
 		}
 		t.OwnerMemberID = &m.ID
 		if _, err := q.CreateDevice(ctx, db.CreateDeviceParams{
-			TripID: t.ID, TokenHash: hash, Status: StatusApproved, MemberID: &m.ID, RequestedName: creatorName,
+			TripID: t.ID, UserID: &userID, Status: StatusApproved, MemberID: &m.ID, RequestedName: creatorName,
 		}); err != nil {
 			return err
 		}
-		out = Created{Trip: t, Member: m, Token: token}
+		out = Created{Trip: t, Member: m}
 		return nil
 	})
 	return out, err
@@ -180,69 +179,140 @@ func (s *Service) ListMembers(ctx context.Context, tripID uuid.UUID) ([]db.Membe
 	return s.q.ListMembers(ctx, tripID)
 }
 
-// RequestJoin files a pending join request and returns the device's secret
-// token. claim names an existing member when the person is already in the
-// trip (e.g. on a new phone); otherwise name is a new member's name.
-func (s *Service) RequestJoin(ctx context.Context, tripID uuid.UUID, name string, claim *uuid.UUID, promptpay *string) (string, db.Device, error) {
+// RequestJoin files a pending join request for the user. claim names an
+// existing member when the person is already in the trip (e.g. they joined
+// before sign-in existed); otherwise name is a new member's name. A user who
+// was turned down may ask again.
+func (s *Service) RequestJoin(ctx context.Context, userID, tripID uuid.UUID, name string, claim *uuid.UUID, promptpay *string) (db.Device, error) {
+	switch d, err := s.q.GetDeviceForUser(ctx, db.GetDeviceForUserParams{TripID: tripID, UserID: &userID}); {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return db.Device{}, err
+	case d.Status == StatusApproved:
+		return db.Device{}, apperr.Conflict("already_member", "คุณอยู่ในทริปนี้แล้ว")
+	case d.Status == StatusPending:
+		return db.Device{}, apperr.Conflict("already_requested", "ส่งคำขอไปแล้ว รอเจ้าของทริปอนุมัติ")
+	}
+
 	members, err := s.q.ListMembers(ctx, tripID)
 	if err != nil {
-		return "", db.Device{}, err
+		return db.Device{}, err
 	}
-	arg := db.CreateDeviceParams{TripID: tripID, Status: StatusPending}
+	arg := db.CreateDeviceParams{TripID: tripID, UserID: &userID, Status: StatusPending}
 	if claim != nil {
 		m, ok := findMember(members, *claim)
 		if !ok {
-			return "", db.Device{}, ErrMemberNotFound
+			return db.Device{}, ErrMemberNotFound
 		}
 		arg.RequestedMemberID, arg.RequestedName = &m.ID, m.Name
 	} else {
 		n, err := validName(name)
 		if err != nil {
-			return "", db.Device{}, err
+			return db.Device{}, err
 		}
 		if nameTaken(members, n) {
-			return "", db.Device{}, errNameTaken
+			return db.Device{}, errNameTaken
 		}
 		pp, err := normalizePromptPay(promptpay)
 		if err != nil {
-			return "", db.Device{}, err
+			return db.Device{}, err
 		}
 		arg.RequestedName, arg.Promptpay = n, pp
 	}
 
 	pending, err := s.q.CountPendingDevices(ctx, tripID)
 	if err != nil {
-		return "", db.Device{}, err
+		return db.Device{}, err
 	}
 	if pending >= maxPending {
-		return "", db.Device{}, apperr.Conflict("too_many_requests", "มีคำขอรออนุมัติเยอะเกินไป ให้เจ้าของทริปจัดการก่อน")
+		return db.Device{}, apperr.Conflict("too_many_requests", "มีคำขอรออนุมัติเยอะเกินไป ให้เจ้าของทริปจัดการก่อน")
 	}
 
-	token, hash := newToken()
-	arg.TokenHash = hash
-	d, err := s.q.CreateDevice(ctx, arg)
-	if isForeignKeyViolation(err) {
-		return "", db.Device{}, ErrTripNotFound
+	var d db.Device
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		if err := q.DeleteRejectedDevice(ctx, db.DeleteRejectedDeviceParams{TripID: tripID, UserID: &userID}); err != nil {
+			return err
+		}
+		var err error
+		d, err = q.CreateDevice(ctx, arg)
+		return err
+	})
+	switch {
+	case isForeignKeyViolation(err):
+		return db.Device{}, ErrTripNotFound
+	case isUniqueViolation(err): // a second request raced this one
+		return db.Device{}, apperr.Conflict("already_requested", "ส่งคำขอไปแล้ว รอเจ้าของทริปอนุมัติ")
 	}
-	return token, d, err
+	return d, err
 }
 
-// Device resolves a token to its device in tripID.
-func (s *Service) Device(ctx context.Context, tripID uuid.UUID, token string) (db.Device, error) {
-	if token == "" {
-		return db.Device{}, ErrDeviceNotFound
-	}
-	d, err := s.q.GetDeviceByToken(ctx, hashToken(token))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && d.TripID != tripID) {
+// DeviceForUser is the user's membership (or join request) in tripID.
+func (s *Service) DeviceForUser(ctx context.Context, tripID, userID uuid.UUID) (db.Device, error) {
+	d, err := s.q.GetDeviceForUser(ctx, db.GetDeviceForUserParams{TripID: tripID, UserID: &userID})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return db.Device{}, ErrDeviceNotFound
 	}
 	return d, err
+}
+
+// ClaimDevices moves memberships held by pre-sign-in device tokens onto the
+// user and invalidates those tokens. Tokens that are unknown, already
+// claimed, or for a trip the user is already in are skipped.
+func (s *Service) ClaimDevices(ctx context.Context, userID uuid.UUID, tokens []string) (int, error) {
+	if len(tokens) > maxClaims {
+		tokens = tokens[:maxClaims]
+	}
+	n := 0
+	for _, t := range tokens {
+		t = strings.TrimSpace(t)
+		if t == "" || len(t) > 100 {
+			continue
+		}
+		_, err := s.q.ClaimDevice(ctx, db.ClaimDeviceParams{TokenHash: auth.HashToken(t), UserID: &userID})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), isUniqueViolation(err):
+			continue
+		case err != nil:
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// Leave removes the user's membership or cancels their join request. Their
+// member (and its expenses) stays in the trip. The owner can't leave: nobody
+// else could ever approve anyone again.
+func (s *Service) Leave(ctx context.Context, t db.Trip, d db.Device) error {
+	if d.Status == StatusApproved && d.MemberID != nil && t.OwnerMemberID != nil && *t.OwnerMemberID == *d.MemberID {
+		return apperr.Conflict("owner_cannot_leave", "เจ้าของทริปออกจากทริปไม่ได้")
+	}
+	return s.q.DeleteDeviceForUser(ctx, db.DeleteDeviceForUserParams{TripID: t.ID, UserID: d.UserID})
+}
+
+// MyTrips lists the trips the user is in or waiting to join.
+func (s *Service) MyTrips(ctx context.Context, userID uuid.UUID) ([]db.ListUserTripsRow, error) {
+	return s.q.ListUserTrips(ctx, &userID)
 }
 
 // Member returns the member only if it belongs to tripID.
 func (s *Service) Member(ctx context.Context, tripID, memberID uuid.UUID) (db.Member, error) {
 	m, err := s.q.GetMember(ctx, memberID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && m.TripID != tripID) {
+		return db.Member{}, ErrMemberNotFound
+	}
+	return m, err
+}
+
+// UpdatePromptPay sets (or clears, with nil/empty) a member's PromptPay ID.
+func (s *Service) UpdatePromptPay(ctx context.Context, tripID, memberID uuid.UUID, promptpay *string) (db.Member, error) {
+	pp, err := normalizePromptPay(promptpay)
+	if err != nil {
+		return db.Member{}, err
+	}
+	m, err := s.q.UpdateMemberPromptPay(ctx, db.UpdateMemberPromptPayParams{ID: memberID, TripID: tripID, Promptpay: pp})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return db.Member{}, ErrMemberNotFound
 	}
 	return m, err
@@ -353,19 +423,6 @@ func normalizePromptPay(p *string) (*string, error) {
 		return nil, apperr.Invalid("invalid_promptpay", "พร้อมเพย์ต้องเป็นเบอร์โทร 10 หลัก หรือเลข 13/15 หลัก")
 	}
 	return &digits, nil
-}
-
-// newToken returns a 256-bit random token for the device and its hash for the DB.
-func newToken() (string, []byte) {
-	b := make([]byte, 32)
-	_, _ = rand.Read(b) // never fails per crypto/rand docs
-	t := base64.RawURLEncoding.EncodeToString(b)
-	return t, hashToken(t)
-}
-
-func hashToken(t string) []byte {
-	h := sha256.Sum256([]byte(t))
-	return h[:]
 }
 
 func newInviteCode() string {

@@ -4,8 +4,7 @@ import { I18nProvider } from '../../i18n/I18nProvider'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { getIdentity, setIdentity } from '../../lib/identity'
-import { getRecentTrips } from '../../lib/recentTrips'
+import { AuthContext } from '../../auth/context'
 import { DashboardPage } from './DashboardPage'
 import { TripLayout } from './TripLayout'
 
@@ -33,7 +32,7 @@ const request = { id: 'r1', status: 'pending', requested_name: 'แบงก์'
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status })
 
 // Server state the mock serves; tests tweak it.
-let meStatus: 'pending' | 'approved' = 'approved'
+let meStatus: 'none' | 'pending' | 'approved' = 'approved'
 let meMember = members[0]
 let calls: { url: string; init?: RequestInit }[] = []
 
@@ -46,7 +45,11 @@ beforeEach(() => {
     const url = String(input)
     calls.push({ url, init })
     if (url.endsWith('/trips/ABCDEFGH23')) return json({ trip, members: members.map(({ id, name }) => ({ id, name })) })
-    if (url.endsWith('/join')) return json({ token: 'new-token', request }, 201)
+    if (url.endsWith('/join')) {
+      meStatus = 'pending'
+      return json({ request }, 201)
+    }
+    if (url.endsWith('/me') && meStatus === 'none') return json({ error: { code: 'not_a_member', message: 'x' } }, 403)
     if (url.endsWith('/me'))
       return json({ status: meStatus, request, member: meStatus === 'approved' ? meMember : null, is_owner: meMember.id === 'm2' })
     if (url.endsWith('/members')) return json(members)
@@ -66,11 +69,13 @@ function renderAt(path: string) {
       <ConfirmProvider>
       <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[path]}>
+        <AuthContext.Provider value={{ user: { id: 'u1', name: 'แบงก์ Google', email: 'b@example.com', picture: null }, logout: async () => {} }}>
         <Routes>
           <Route path="/t/:code" element={<TripLayout />}>
             <Route index element={<DashboardPage />} />
           </Route>
         </Routes>
+        </AuthContext.Provider>
       </MemoryRouter>
     </QueryClientProvider>
       </ConfirmProvider>
@@ -79,41 +84,40 @@ function renderAt(path: string) {
 }
 
 it('a newcomer can only request to join and sees nothing until approved', async () => {
-  meStatus = 'pending'
+  meStatus = 'none'
   renderAt('/t/abcdefgh23')
 
   expect(await screen.findByText('ขอเข้าทริปในชื่อ')).toBeInTheDocument()
+  // The name starts as the account name.
+  expect(screen.getByPlaceholderText('ชื่อเล่น')).toHaveValue('แบงก์ Google')
   fireEvent.change(screen.getByPlaceholderText('ชื่อเล่น'), { target: { value: 'แบงก์' } })
   fireEvent.click(screen.getByRole('button', { name: 'ส่งคำขอเข้าทริป' }))
 
   expect(await screen.findByText('รอเจ้าของทริปอนุมัติ')).toBeInTheDocument()
-  expect(getIdentity('t1')).toEqual({ token: 'new-token' })
   expect(calls.some((c) => c.url.endsWith('/expenses'))).toBe(false)
-  const meCall = calls.find((c) => c.url.endsWith('/me'))!
-  expect(new Headers(meCall.init?.headers).get('X-Device-Token')).toBe('new-token')
+  // Nothing secret is kept in the browser any more.
+  expect(Object.keys(localStorage).filter((k) => k.includes('device'))).toEqual([])
+  const join = calls.find((c) => c.url.endsWith('/join'))!
+  expect(new Headers(join.init?.headers).get('X-Requested-With')).toBe('travel-split')
 })
 
-it('an approved device sees the dashboard and is remembered', async () => {
-  setIdentity('t1', { token: 'tok' })
+it('an approved member sees the dashboard', async () => {
   renderAt('/t/ABCDEFGH23')
 
-  expect(await screen.findByText('สวัสดี แบงก์')).toBeInTheDocument()
+  expect(await screen.findByText(/สวัสดี แบงก์/)).toBeInTheDocument()
   expect(await screen.findByText('คุณต้องจ่ายเพื่อน')).toBeInTheDocument()
   expect(screen.getByText('ราเมง')).toBeInTheDocument()
-  expect(getIdentity('t1')).toEqual({ token: 'tok', memberId: 'm1' })
-  expect(getRecentTrips()).toMatchObject([{ id: 't1', name: 'โตเกียว', myName: 'แบงก์' }])
   // Non-owners never ask for join requests.
   expect(calls.some((c) => c.url.endsWith('/join-requests'))).toBe(false)
 })
 
 it('the owner sees pending requests and can approve them', async () => {
   meMember = members[1]
-  setIdentity('t1', { token: 'owner-token' })
   renderAt('/t/ABCDEFGH23')
 
   expect(await screen.findByText('คำขอเข้าทริป (1)')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'อนุมัติ แบงก์' }))
-  await screen.findByText('สวัสดี ฝน')
+  await screen.findByText(/สวัสดี ฝน/)
   await vi.waitFor(() => expect(calls.some((c) => c.url.endsWith('/join-requests/r1/approve'))).toBe(true))
 })
 

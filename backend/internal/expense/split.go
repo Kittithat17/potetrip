@@ -3,6 +3,9 @@ package expense
 import (
 	"errors"
 	"math/big"
+	"slices"
+
+	"github.com/google/uuid"
 )
 
 // Allocate splits total into len(weights) integer parts proportional to
@@ -55,4 +58,42 @@ func SplitEqual(total int64, n int) ([]int64, error) {
 		weights[i] = 1
 	}
 	return Allocate(total, weights)
+}
+
+// SplitItems shares totalBase across receipt lines. The total is first
+// allocated to lines in proportion to their prices, so tax, service charge
+// or a discount on the bill spreads evenly; each line's part is then split
+// equally among the people who had it (in trip order). Shares come back in
+// trip order and always sum exactly to totalBase.
+func SplitItems(totalBase int64, items []Item, order map[uuid.UUID]int) ([]Share, error) {
+	weights := make([]int64, len(items))
+	for i, it := range items {
+		weights[i] = it.Amount
+	}
+	perItem, err := Allocate(totalBase, weights)
+	if err != nil {
+		return nil, err
+	}
+	owed := map[uuid.UUID]int64{}
+	for i, it := range items {
+		parts, err := SplitEqual(perItem[i], len(it.MemberIDs))
+		if err != nil {
+			return nil, err
+		}
+		for j, id := range it.MemberIDs {
+			owed[id] += parts[j]
+		}
+	}
+	ids := make([]uuid.UUID, 0, len(owed))
+	for id, v := range owed {
+		if v > 0 {
+			ids = append(ids, id)
+		}
+	}
+	slices.SortFunc(ids, func(a, b uuid.UUID) int { return order[a] - order[b] })
+	out := make([]Share, len(ids))
+	for i, id := range ids {
+		out[i] = Share{MemberID: id, AmountBase: owed[id]}
+	}
+	return out, nil
 }

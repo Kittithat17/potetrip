@@ -7,17 +7,19 @@ import type { Me, PublicMember, Trip } from '../../api/types'
 import { AppFrame, BlueHeader, Sheet } from '../../components/shell'
 import { Avatar, Button, ErrorText, Field, TextInput } from '../../components/ui'
 import { useI18n } from '../../i18n/context'
+import { useAuth } from '../../auth/context'
 
-type JoinProps = { trip: Trip; members: PublicMember[]; onRequested: (token: string) => void }
+type JoinProps = { trip: Trip; members: PublicMember[]; onRequested: () => void }
 
 /** Someone opened an invite link: they may only ask the owner to let them in. */
 export function JoinPage({ trip, members, onRequested }: JoinProps) {
   const { t } = useI18n()
-  const [name, setName] = useState('')
+  const { user } = useAuth()
+  const [name, setName] = useState(user.name)
   const [promptpay, setPromptpay] = useState('')
   const join = useMutation({
     mutationFn: (body: { name?: string; member_id?: string; promptpay?: string | null }) => requestJoin(trip.id, body),
-    onSuccess: (r) => onRequested(r.token),
+    onSuccess: () => onRequested(),
   })
 
   const onNew = (e: FormEvent) => {
@@ -78,9 +80,9 @@ export function JoinPage({ trip, members, onRequested }: JoinProps) {
   )
 }
 
-type WaitProps = { trip: Trip; me: Me; onCancel: () => void }
+type WaitProps = { trip: Trip; me: Me; onCancel: () => void; cancelling?: boolean }
 
-export function WaitingPage({ trip, me, onCancel }: WaitProps) {
+export function WaitingPage({ trip, me, onCancel, cancelling }: WaitProps) {
   const { t } = useI18n()
   const rejected = me.status === 'rejected'
   return (
@@ -96,7 +98,7 @@ export function WaitingPage({ trip, me, onCancel }: WaitProps) {
               <UserRoundX className="mx-auto size-14 text-red-500" />
               <p className="text-lg font-bold">{t('join.rejected')}</p>
               <p className="text-sm text-slate-600">{t('join.rejectedHint')}</p>
-              <Button className="w-full" onClick={onCancel}>
+              <Button className="w-full" onClick={onCancel} disabled={cancelling}>
                 {t('join.requestAgain')}
               </Button>
             </>
@@ -109,7 +111,7 @@ export function WaitingPage({ trip, me, onCancel }: WaitProps) {
                 <br />
                 {t('join.waitingHint')}
               </p>
-              <Button variant="ghost" className="w-full" onClick={onCancel}>
+              <Button variant="ghost" className="w-full" onClick={onCancel} disabled={cancelling}>
                 {t('join.cancel')}
               </Button>
             </>
