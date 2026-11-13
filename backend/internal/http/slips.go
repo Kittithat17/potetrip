@@ -5,8 +5,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/raisin/travel-split/backend/internal/platform/apperr"
 	"github.com/raisin/travel-split/backend/internal/domain/slip"
+	"github.com/raisin/travel-split/backend/internal/platform/apperr"
 )
 
 // uploadSlips reads every image in a multipart request (any file field) and

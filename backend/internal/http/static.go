@@ -8,12 +8,12 @@ import (
 	"strings"
 )
 
-// contentSecurityPolicy limits the web app to its own code. Exceptions:
-// Google Fonts (Noto Sans Thai) and Google profile photos.
+// contentSecurityPolicy limits the web app to its own code (fonts are
+// self-hosted). The one exception is Google profile photos.
 const contentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self'; " +
-	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-	"font-src 'self' https://fonts.gstatic.com; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"font-src 'self'; " +
 	"img-src 'self' data: blob: https://*.googleusercontent.com; " +
 	"connect-src 'self'; " +
 	"worker-src 'self'; manifest-src 'self'; " +

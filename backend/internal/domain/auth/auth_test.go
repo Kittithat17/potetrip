@@ -77,3 +77,17 @@ func TestAuthURL(t *testing.T) {
 		t.Fatal("auth url leaks the PKCE verifier or client secret")
 	}
 }
+
+func TestDeviceName(t *testing.T) {
+	for ua, want := range map[string]string{
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)":       "iPhone",
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)":              "Mac",
+		"Mozilla/5.0 (Linux; Android 15; Pixel 9)":                     "Android",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36": "Windows",
+		"": "อุปกรณ์",
+	} {
+		if got := DeviceName(ua); got != want {
+			t.Errorf("%q -> %q, want %q", ua, got, want)
+		}
+	}
+}

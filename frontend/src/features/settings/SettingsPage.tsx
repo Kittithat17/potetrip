@@ -1,11 +1,15 @@
-import { Check, ChevronRight, Info, Languages, LogOut, Luggage } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check, ChevronRight, Info, KeyRound, Languages, LogOut, Luggage, Plus, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useMyTrips } from '../../api/hooks'
+import { deletePasskey, listPasskeys } from '../../api/endpoints'
 import { useAuth } from '../auth/context'
+import { addPasskey, isPasskeyCancel, passkeysSupported } from '../auth/passkey'
+import { formatShortDate } from '../../lib/datetime'
 import { HealthBadge } from '../../components/feedback/HealthBadge'
 import { AppFrame, BlueHeader } from '../../components/ui/shell'
-import { Avatar } from '../../components/ui/ui'
+import { Avatar, ErrorText } from '../../components/ui/ui'
 import { LANGS, useI18n } from '../../i18n/context'
 import { mainNav } from '../../app/nav'
 import { useConfirm } from '../../components/feedback/confirm'
@@ -46,10 +50,12 @@ export function SettingsPage() {
             }
             bare
             label={user.name}
-            detail={user.email}
+            detail={user.email ?? t('settings.passkeyAccount')}
           />
           <Row icon={<LogOut className="size-5" />} label={t('settings.logout')} onClick={onLogout} danger disabled={signingOut} />
         </Group>
+
+        <PasskeysGroup />
 
         <Group title={t('settings.language')}>
           {LANGS.map((l) => (
@@ -82,11 +88,78 @@ export function SettingsPage() {
   )
 }
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * Passkeys on this account: sign in with Face ID / fingerprint instead of
+ * Google, which matters where Google is blocked (mainland China).
+ */
+function PasskeysGroup() {
+  const { t, locale } = useI18n()
+  const confirm = useConfirm()
+  const qc = useQueryClient()
+  const list = useQuery({ queryKey: ['auth', 'passkeys'], queryFn: listPasskeys })
+  const supported = passkeysSupported()
+  const add = useMutation({
+    mutationFn: addPasskey,
+    onSuccess: (keys) => qc.setQueryData(['auth', 'passkeys'], keys),
+  })
+  const remove = useMutation({
+    mutationFn: deletePasskey,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['auth', 'passkeys'] }),
+  })
+  const onRemove = async (id: string, name: string) => {
+    const ok = await confirm({
+      title: t('settings.passkeyDeleteTitle', { name }),
+      message: t('settings.passkeyDeleteHint'),
+      confirmLabel: t('settings.passkeyDeleteAction'),
+    })
+    if (ok) remove.mutate(id)
+  }
+
+  return (
+    <Group title={t('settings.passkeys')} hint={t('settings.passkeyHint')}>
+      {list.data?.map((k) => (
+        <Row
+          key={k.id}
+          icon={<KeyRound className="size-5" />}
+          label={k.name}
+          detail={
+            t('settings.passkeyAdded', { date: formatShortDate(k.created_at, locale) }) +
+            (k.last_used_at ? ' · ' + t('settings.passkeyUsed', { date: formatShortDate(k.last_used_at, locale) }) : '')
+          }
+          right={
+            <button
+              type="button"
+              onClick={() => onRemove(k.id, k.name)}
+              aria-label={t('settings.passkeyDelete', { name: k.name })}
+              className="rounded-full p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          }
+        />
+      ))}
+      <Row
+        icon={<Plus className="size-5" />}
+        label={t('settings.passkeyAdd')}
+        detail={supported ? undefined : t('settings.passkeyUnsupported')}
+        onClick={() => add.mutate()}
+        disabled={!supported || add.isPending}
+      />
+      {(add.error && !isPasskeyCancel(add.error)) || remove.error ? (
+        <li className="px-4 py-2">
+          <ErrorText error={add.error ?? remove.error} />
+        </li>
+      ) : null}
+    </Group>
+  )
+}
+
+function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
     <section>
       <h2 className="mb-1.5 px-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">{title}</h2>
       <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">{children}</ul>
+      {hint && <p className="mt-1.5 px-2 text-xs text-slate-500">{hint}</p>}
     </section>
   )
 }

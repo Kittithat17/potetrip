@@ -1,17 +1,29 @@
 import { API_BASE_URL, apiFetch } from './client'
-import type { Balance, Expense, ExpenseInput, JoinRequest, Me, Member, MyTrip, PublicMember, SlipOutcome, Summary, Transfer, Trip, User } from './types'
+import type { AuthConfig, Balance, Expense, ExpenseInput, JoinRequest, Me, Member, MyTrip, Passkey, PublicMember, SlipOutcome, Summary, Transfer, Trip, User } from './types'
 
 export const createTrip = (body: { name: string; base_currency: string; creator_name?: string }) =>
   apiFetch<{ trip: Trip; member: Member }>('/trips', { method: 'POST', body })
 
 // ---- account ----
 
-export const getAuthConfig = () => apiFetch<{ provider: 'google' | 'mock' }>('/auth/config')
+export const getAuthConfig = () => apiFetch<AuthConfig>('/auth/config')
 export const getCurrentUser = () => apiFetch<User>('/auth/me')
 export const mockLogin = (name: string) => apiFetch<User>('/auth/mock', { method: 'POST', body: { name } })
 export const logout = () => apiFetch<void>('/auth/logout', { method: 'POST' })
 export const claimDevices = (tokens: string[]) => apiFetch<{ claimed: number }>('/auth/claim', { method: 'POST', body: { tokens } })
 export const listMyTrips = () => apiFetch<MyTrip[]>('/me/trips')
+
+// Passkeys: each ceremony is begin (options for the browser) + finish (its signed answer).
+// The options/answers are WebAuthn JSON, passed through untouched.
+export const passkeyLoginBegin = () => apiFetch<unknown>('/auth/passkey/login/begin', { method: 'POST' })
+export const passkeyLoginFinish = (answer: unknown) => apiFetch<User>('/auth/passkey/login/finish', { method: 'POST', body: answer })
+export const passkeySignupBegin = (name: string) => apiFetch<unknown>('/auth/passkey/signup/begin', { method: 'POST', body: { name } })
+export const passkeySignupFinish = (answer: unknown) => apiFetch<User>('/auth/passkey/signup/finish', { method: 'POST', body: answer })
+export const passkeyRegisterBegin = () => apiFetch<unknown>('/auth/passkey/register/begin', { method: 'POST' })
+export const passkeyRegisterFinish = (answer: unknown) => apiFetch<Passkey[]>('/auth/passkey/register/finish', { method: 'POST', body: answer })
+export const listPasskeys = () => apiFetch<Passkey[]>('/auth/passkeys')
+export const deletePasskey = (id: string) => apiFetch<void>(`/auth/passkeys/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
 /** Full-page navigation: Google's sign-in page can't be fetched. */
 export const googleSignInUrl = (next: string) => `${API_BASE_URL}/auth/google/start?next=${encodeURIComponent(next)}`
 

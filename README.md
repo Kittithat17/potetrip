@@ -144,7 +144,7 @@ backend เก็บเรตไว้ในตาราง `fx_rates`: เร�
 
 ## การเข้าสู่ระบบและสิทธิ์เข้าทริป
 
-**ทุกคนต้องเข้าสู่ระบบด้วย Google ก่อน** ถ้ายังไม่เข้าสู่ระบบ จะเปิดหน้าไหนหรือเรียก API ไหนไม่ได้เลย ยกเว้น `/healthz` และ `/api/v1/auth/*` หลังเข้าสู่ระบบ แอปจะพากลับไปหน้าที่เปิดไว้ เช่นลิงก์เชิญ
+**ทุกคนต้องเข้าสู่ระบบก่อน** ทำได้ 2 วิธี: **Google** หรือ **Passkey** (Face ID / ลายนิ้วมือ / รหัสเครื่อง) ถ้ายังไม่เข้าสู่ระบบ จะเปิดหน้าไหนหรือเรียก API ไหนไม่ได้เลย ยกเว้น `/healthz` และ `/api/v1/auth/*` หลังเข้าสู่ระบบ แอปจะพากลับไปหน้าที่เปิดไว้ เช่นลิงก์เชิญ
 
 - **Session อยู่ในคุกกี้ HttpOnly** JavaScript อ่านไม่ได้ จึงขโมยผ่าน XSS ไม่ได้ ตั้งค่า `SameSite=Lax` ถ้า `PUBLIC_URL` เป็น https จะใช้ชื่อ `__Host-ts_session` และเป็น `Secure` ฝั่ง DB เก็บแค่ SHA-256 ของ token อายุ 60 วัน และต่ออายุอัตโนมัติเมื่อมีการใช้งาน ส่วนการออกจากระบบจะลบ session ที่เซิร์ฟเวอร์ด้วย
 - **ไม่มีข้อมูลลับใน localStorage** localStorage เหลือแค่ภาษาและคู่สกุลเงินที่เลือกไว้
@@ -152,6 +152,19 @@ backend เก็บเรตไว้ในตาราง `fx_rates`: เร�
 - **Google OAuth:** ใช้ authorization code + PKCE + `state` ในคุกกี้ HttpOnly อายุ 10 นาที `client_secret` อยู่แค่ฝั่งเซิร์ฟเวอร์ และตรวจ `iss`, `aud`, `exp` กับ `email_verified` ของ ID token ส่วนหน้าที่จะกลับไปหลังล็อกอินต้องเป็น path ในเว็บเราเท่านั้น (กัน open redirect)
 - **ห้ามใช้ `AUTH_PROVIDER=mock` บนเว็บจริง** โหมดนี้ใช้ตอน dev เท่านั้น พิมพ์ชื่ออะไรก็เข้าได้ และเซิร์ฟเวอร์จะไม่ยอมเริ่มถ้า `PUBLIC_URL` เป็น https
 - **เครื่องที่เคยใช้แอปก่อนมีระบบล็อกอิน:** ล็อกอินครั้งแรกแล้ว แอปจะส่ง token เดิมใน localStorage ไปผูกทริปเข้ากับบัญชี (`POST /auth/claim`) จากนั้นเซิร์ฟเวอร์ทำให้ token นั้นใช้ไม่ได้อีก และแอปลบออกจากเครื่อง
+
+### Passkey (ใช้ได้แม้ Google ถูกบล็อก เช่นในจีน)
+
+- **เพิ่มให้บัญชีเดิม:** ล็อกอินด้วย Google แล้วไปที่ ตั้งค่า → Passkey → "เพิ่ม Passkey บนเครื่องนี้" ควรทำก่อนเดินทาง
+- **สร้างบัญชีใหม่ด้วย Passkey อย่างเดียว:** หน้าล็อกอิน → "ยังไม่มีบัญชี? สร้างด้วย Passkey" ไม่ต้องมี Google
+  - ถ้าเครื่องหายและ Passkey ไม่ได้ sync ไว้ใน iCloud หรือ Google Password Manager จะกู้บัญชีไม่ได้
+  - บัญชีแบบนี้ลบ Passkey อันสุดท้ายไม่ได้ (409 `last_sign_in_method`)
+- **Passkey ผูกกับชื่อโดเมน:** relying party ID คือ host ของ `PUBLIC_URL` ถ้าเปลี่ยนโดเมน ทุกคนต้องเพิ่ม Passkey ใหม่ จึงควรใช้โดเมนจริงก่อนให้ทุกคนตั้ง
+- WebAuthn ต้องใช้ https (หรือ `http://localhost` ตอน dev) จึงใช้ผ่าน IP ในวง LAN ไม่ได้
+- **ฝั่งเซิร์ฟเวอร์เก็บแค่ public key** (ตาราง `passkeys`)
+  - challenge ใช้ได้ครั้งเดียวและหมดอายุใน 5 นาที (ตาราง `auth_challenges` คุกกี้ `ts_webauthn` แบบ HttpOnly + SameSite=Strict)
+  - บังคับให้เครื่องยืนยันตัวตนด้วย biometrics หรือ PIN ทุกครั้ง (user verification required)
+  - ใช้ไลบรารี go-webauthn ฝั่งเซิร์ฟเวอร์ และ @simplewebauthn/browser ฝั่งเว็บ
 
 สิทธิ์ในทริป:
 - **คนสร้างทริป** เป็นเจ้าของ ได้รับอนุมัติอัตโนมัติ และออกจากทริปไม่ได้
@@ -191,6 +204,10 @@ Base path `/api/v1` ทุก endpoint (ยกเว้น `healthz` และ `
 | POST | `/auth/logout` | ทุกคน | ลบ session |
 | GET | `/auth/me` | เข้าสู่ระบบ | `{id, email, name, picture}` |
 | POST | `/auth/claim` | เข้าสู่ระบบ | `{tokens: [...]}` ย้ายทริปจาก token แบบเก่ามาไว้ในบัญชี |
+| POST | `/auth/passkey/login/begin` → `/finish` | ทุกคน | ล็อกอินด้วย Passkey (ส่ง WebAuthn JSON) |
+| POST | `/auth/passkey/signup/begin` `{name}` → `/finish` | ทุกคน | สร้างบัญชีด้วย Passkey |
+| POST | `/auth/passkey/register/begin` → `/finish` | เข้าสู่ระบบ | เพิ่ม Passkey ให้บัญชี |
+| GET / DELETE | `/auth/passkeys[/{id}]` | เข้าสู่ระบบ | รายการ / ลบ Passkey |
 | GET | `/me/trips` | เข้าสู่ระบบ | ทริปที่อยู่หรือรออนุมัติ `[{id, name, invite_code, status, member_name, is_owner}]` |
 | POST | `/trips` | เข้าสู่ระบบ | `{name, creator_name?, base_currency?, promptpay?}` คืน `{trip, member}` (ถ้าไม่ส่ง `creator_name` จะใช้ชื่อบัญชี) |
 | GET | `/trips/{inviteCode}` | เข้าสู่ระบบ | `{trip, members: [{id, name}]}` |
@@ -273,7 +290,7 @@ make backup BACKUP_DATABASE_URL="<connection string ของ Supabase>"   # ไ
 **ลองรัน image production ในเครื่อง:** `make docker-run` แล้วเปิด http://localhost:8090 (ใช้ล็อกอินแบบ mock กับ DB ใน Docker)
 
 **ความปลอดภัยของหน้าเว็บ:** backend ส่ง header ต่อไปนี้มากับหน้าเว็บ
-- `Content-Security-Policy`: โหลดสคริปต์ได้จากเว็บเราเท่านั้น ยกเว้น Google Fonts กับรูปโปรไฟล์ Google
+- `Content-Security-Policy`: ทุกอย่างโหลดจากเว็บเราเท่านั้น ยกเว้นรูปโปรไฟล์ Google ฟอนต์ Noto Sans Thai ก็เก็บไว้ในแอปเอง (`@fontsource`) เพราะ Google Fonts ถูกบล็อกในจีนและทำให้หน้าเว็บค้าง
 - `X-Frame-Options: DENY` และ `frame-ancestors 'none'`: กันเว็บอื่นเอาแอปไปฝังใน iframe
 - `Strict-Transport-Security`: บังคับใช้ https
 - ไฟล์ใน `/assets/` cache ได้ 1 ปี เพราะชื่อไฟล์มี hash เปลี่ยนทุกครั้งที่ build

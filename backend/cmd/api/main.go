@@ -17,14 +17,14 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/raisin/travel-split/backend/internal/domain/auth"
-	"github.com/raisin/travel-split/backend/internal/platform/config"
-	"github.com/raisin/travel-split/backend/internal/platform/db"
 	"github.com/raisin/travel-split/backend/internal/domain/expense"
 	"github.com/raisin/travel-split/backend/internal/domain/fx"
-	apihttp "github.com/raisin/travel-split/backend/internal/http"
 	"github.com/raisin/travel-split/backend/internal/domain/settlement"
 	"github.com/raisin/travel-split/backend/internal/domain/slip"
 	"github.com/raisin/travel-split/backend/internal/domain/trip"
+	apihttp "github.com/raisin/travel-split/backend/internal/http"
+	"github.com/raisin/travel-split/backend/internal/platform/config"
+	"github.com/raisin/travel-split/backend/internal/platform/db"
 	"github.com/raisin/travel-split/backend/migrations"
 )
 
@@ -74,12 +74,19 @@ func run() error {
 		slog.Warn("MOCK sign-in (AUTH_PROVIDER=mock): anyone can sign in as anyone; local dev only")
 	}
 
+	authSvc := auth.NewService(pool)
+	passkeys, err := auth.NewPasskeys(authSvc, cfg.PublicURL)
+	if err != nil {
+		return err
+	}
+
 	rates := fx.NewService(fx.NewFrankfurter(cfg.FXBaseURL), db.New(pool))
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: apihttp.NewServer(apihttp.Deps{
 			DB:          pool,
-			Auth:        auth.NewService(pool),
+			Auth:        authSvc,
+			Passkeys:    passkeys,
 			AuthCfg:     authCfg,
 			Trips:       trip.NewService(pool),
 			Expenses:    expense.NewService(pool, rates),

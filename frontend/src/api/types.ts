@@ -22,7 +22,12 @@ export type JoinRequest = {
 
 export type Me = { status: JoinStatus; request: JoinRequest; member: Member | null; is_owner: boolean }
 
-export type User = { id: string; email: string; name: string; picture: string | null }
+/** email is null for an account made with a passkey only. */
+export type User = { id: string; email: string | null; name: string; picture: string | null; has_google: boolean }
+
+export type AuthConfig = { provider: 'google' | 'mock'; passkeys: boolean }
+
+export type Passkey = { id: string; name: string; created_at: string; last_used_at: string | null }
 
 /** A trip the signed-in user is in (or waiting to join). */
 export type MyTrip = {

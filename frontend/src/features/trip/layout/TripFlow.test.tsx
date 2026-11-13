@@ -69,7 +69,7 @@ function renderAt(path: string) {
       <ConfirmProvider>
       <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[path]}>
-        <AuthContext.Provider value={{ user: { id: 'u1', name: 'แบงก์ Google', email: 'b@example.com', picture: null }, logout: async () => {} }}>
+        <AuthContext.Provider value={{ user: { id: 'u1', name: 'แบงก์ Google', email: 'b@example.com', picture: null, has_google: true }, logout: async () => {} }}>
         <Routes>
           <Route path="/t/:code" element={<TripLayout />}>
             <Route index element={<DashboardPage />} />

@@ -20,7 +20,7 @@ function renderPage() {
       <ConfirmProvider>
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>
-          <AuthContext.Provider value={{ user: { id: 'u1', name: 'Bank', email: 'bank@example.com', picture: null }, logout }}>
+          <AuthContext.Provider value={{ user: { id: 'u1', name: 'Bank', email: 'bank@example.com', picture: null, has_google: true }, logout }}>
             <SettingsPage />
           </AuthContext.Provider>
         </MemoryRouter>

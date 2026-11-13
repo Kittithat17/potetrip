@@ -14,8 +14,8 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/raisin/travel-split/backend/internal/platform/apperr"
 	"github.com/raisin/travel-split/backend/internal/domain/auth"
+	"github.com/raisin/travel-split/backend/internal/platform/apperr"
 )
 
 const (
@@ -126,7 +126,7 @@ func (s *Server) clearSession(w http.ResponseWriter) {
 // ---- handlers ----
 
 func (s *Server) authConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"provider": s.AuthCfg.Provider})
+	writeJSON(w, http.StatusOK, map[string]any{"provider": s.AuthCfg.Provider, "passkeys": s.Passkeys != nil})
 }
 
 type oauthState struct {

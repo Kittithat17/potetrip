@@ -15,9 +15,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/raisin/travel-split/backend/internal/domain/fx"
 	"github.com/raisin/travel-split/backend/internal/platform/apperr"
 	"github.com/raisin/travel-split/backend/internal/platform/db"
-	"github.com/raisin/travel-split/backend/internal/domain/fx"
 	"github.com/raisin/travel-split/backend/internal/platform/money"
 )
 

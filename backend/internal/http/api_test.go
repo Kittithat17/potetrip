@@ -14,8 +14,8 @@ import (
 	"github.com/raisin/travel-split/backend/internal/domain/auth"
 	"github.com/raisin/travel-split/backend/internal/domain/expense"
 	"github.com/raisin/travel-split/backend/internal/domain/settlement"
-	"github.com/raisin/travel-split/backend/internal/platform/testdb"
 	"github.com/raisin/travel-split/backend/internal/domain/trip"
+	"github.com/raisin/travel-split/backend/internal/platform/testdb"
 )
 
 type apiClient struct {
@@ -27,9 +27,15 @@ type apiClient struct {
 
 // testDeps is a server with mock sign-in, as in local dev.
 func testDeps(pool *pgxpool.Pool) Deps {
+	authSvc := auth.NewService(pool)
+	passkeys, err := auth.NewPasskeys(authSvc, "http://localhost:5173")
+	if err != nil {
+		panic(err)
+	}
 	return Deps{
 		DB:          pool,
-		Auth:        auth.NewService(pool),
+		Auth:        authSvc,
+		Passkeys:    passkeys,
 		AuthCfg:     AuthConfig{Provider: "mock", PublicURL: "http://localhost:5173"},
 		Trips:       trip.NewService(pool),
 		Expenses:    expense.NewService(pool, nil),

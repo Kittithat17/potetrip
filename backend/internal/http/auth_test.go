@@ -37,9 +37,9 @@ func TestSessionFlow(t *testing.T) {
 			t.Fatalf("%s: %s", path, code)
 		}
 	}
-	var cfg map[string]string
+	var cfg map[string]any
 	c.do("GET", "/auth/config", nil, 200, &cfg)
-	if cfg["provider"] != "mock" {
+	if cfg["provider"] != "mock" || cfg["passkeys"] != true {
 		t.Fatalf("%v", cfg)
 	}
 

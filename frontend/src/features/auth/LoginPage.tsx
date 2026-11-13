@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { KeyRound } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { getAuthConfig, googleSignInUrl, mockLogin } from '../../api/endpoints'
 import { Button, ErrorText, TextInput } from '../../components/ui/ui'
 import { useI18n } from '../../i18n/context'
 import { LoginBackdrop } from './LoginBackdrop'
+import { isPasskeyCancel, passkeysSupported, signInWithPasskey, signUpWithPasskey } from './passkey'
 
 const ERRORS = ['cancelled', 'expired', 'google', 'server'] as const
 
@@ -68,9 +70,83 @@ export function LoginPage() {
           )}
         </div>
 
+        {cfg.data?.passkeys && passkeysSupported() && <PasskeyLogin onDone={() => qc.resetQueries({ queryKey: ['auth', 'me'] })} />}
+
         <p className="mt-6 text-xs text-slate-400">{t('login.privacy')}</p>
       </main>
     </LoginBackdrop>
+  )
+}
+
+/**
+ * Sign in with a passkey, or create an account with one. Works without
+ * Google, e.g. in mainland China.
+ */
+function PasskeyLogin({ onDone }: { onDone: () => void }) {
+  const { t } = useI18n()
+  const [signingUp, setSigningUp] = useState(false)
+  const [name, setName] = useState('')
+  const [cancelled, setCancelled] = useState(false)
+  const run = useMutation({
+    mutationFn: (action: () => Promise<unknown>) => action(),
+    onMutate: () => setCancelled(false),
+    onSuccess: onDone,
+    onError: (err) => setCancelled(isPasskeyCancel(err)),
+  })
+  const signUp = (e: FormEvent) => {
+    e.preventDefault()
+    run.mutate(() => signUpWithPasskey(name))
+  }
+
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="flex items-center gap-3 text-xs text-slate-400" aria-hidden>
+        <span className="h-px flex-1 bg-slate-200" />
+        {t('login.or')}
+        <span className="h-px flex-1 bg-slate-200" />
+      </div>
+      {signingUp ? (
+        <form onSubmit={signUp} className="space-y-3 text-left">
+          <p className="text-sm text-slate-600">{t('login.signupHint')}</p>
+          <TextInput
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('login.signupName')}
+            aria-label={t('login.signupName')}
+            required
+            maxLength={50}
+            autoFocus
+          />
+          <Button type="submit" className="w-full" disabled={run.isPending}>
+            <KeyRound className="size-4" /> {t('login.signupSubmit')}
+          </Button>
+          <button type="button" onClick={() => setSigningUp(false)} className="block w-full text-center text-sm text-slate-500">
+            {t('common.back')}
+          </button>
+        </form>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => run.mutate(signInWithPasskey)}
+            disabled={run.isPending}
+            className="flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-white font-medium text-slate-800 ring-1 ring-slate-300 transition-colors hover:bg-slate-50 disabled:opacity-60"
+          >
+            <KeyRound className="size-5 text-brand-600" />
+            {t('login.passkey')}
+          </button>
+          <p className="text-xs text-slate-500">{t('login.passkeyHint')}</p>
+          <button type="button" onClick={() => setSigningUp(true)} className="text-sm font-medium text-brand-700">
+            {t('login.signup')}
+          </button>
+        </>
+      )}
+      {cancelled ? (
+        <p className="text-sm text-slate-500">{t('login.passkeyCancelled')}</p>
+      ) : (
+        <ErrorText error={run.error} />
+      )}
+    </div>
   )
 }
 

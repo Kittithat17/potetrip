@@ -38,22 +38,29 @@ type Profile struct {
 	Picture string
 }
 
-// User is the public view of a signed-in person.
+// User is the public view of a signed-in person. Email is nil for an
+// account made with a passkey only.
 type User struct {
-	ID      uuid.UUID `json:"id"`
-	Email   string    `json:"email"`
-	Name    string    `json:"name"`
-	Picture *string   `json:"picture"`
+	ID        uuid.UUID `json:"id"`
+	Email     *string   `json:"email"`
+	Name      string    `json:"name"`
+	Picture   *string   `json:"picture"`
+	HasGoogle bool      `json:"has_google"`
 }
 
-func view(u db.User) User { return User{ID: u.ID, Email: u.Email, Name: u.Name, Picture: u.Picture} }
+func view(u db.User) User {
+	return User{ID: u.ID, Email: u.Email, Name: u.Name, Picture: u.Picture, HasGoogle: u.GoogleSub != nil}
+}
 
 type Service struct {
-	q   *db.Queries
-	now func() time.Time
+	pool *pgxpool.Pool
+	q    *db.Queries
+	now  func() time.Time
 }
 
-func NewService(pool *pgxpool.Pool) *Service { return &Service{q: db.New(pool), now: time.Now} }
+func NewService(pool *pgxpool.Pool) *Service {
+	return &Service{pool: pool, q: db.New(pool), now: time.Now}
+}
 
 // Login records the profile and starts a session. It returns the session
 // token for the cookie and when it expires.
@@ -61,30 +68,44 @@ func (s *Service) Login(ctx context.Context, p Profile) (User, string, time.Time
 	if p.Subject == "" {
 		return User{}, "", time.Time{}, errors.New("auth: empty subject")
 	}
-	name := strings.TrimSpace(p.Name)
+	name, _ := cleanName(p.Name)
 	if name == "" {
-		name, _, _ = strings.Cut(p.Email, "@")
-	}
-	if utf8.RuneCountInString(name) > maxName {
-		name = string([]rune(name)[:maxName])
+		name, _ = cleanName(strings.SplitN(p.Email, "@", 2)[0])
 	}
 	var pic *string
 	if strings.HasPrefix(p.Picture, "https://") {
 		pic = &p.Picture
 	}
-	u, err := s.q.UpsertUser(ctx, db.UpsertUserParams{GoogleSub: p.Subject, Email: p.Email, Name: name, Picture: pic})
+	email := p.Email
+	u, err := s.q.UpsertUser(ctx, db.UpsertUserParams{GoogleSub: &p.Subject, Email: &email, Name: name, Picture: pic})
 	if err != nil {
 		return User{}, "", time.Time{}, err
 	}
-	// Housekeeping: logins are rare enough to sweep old sessions here.
-	_ = s.q.DeleteExpiredSessions(ctx)
+	token, exp, err := s.startSession(ctx, s.q, u.ID)
+	return view(u), token, exp, err
+}
+
+// startSession issues a session for userID (any sign-in method).
+func (s *Service) startSession(ctx context.Context, q *db.Queries, userID uuid.UUID) (string, time.Time, error) {
+	// Housekeeping: sign-ins are rare enough to sweep expired rows here.
+	_ = q.DeleteExpiredSessions(ctx)
+	_ = q.DeleteExpiredChallenges(ctx)
 
 	token, hash := NewToken()
 	exp := s.now().Add(SessionTTL)
-	if err := s.q.CreateSession(ctx, db.CreateSessionParams{TokenHash: hash, UserID: u.ID, ExpiresAt: exp}); err != nil {
-		return User{}, "", time.Time{}, err
+	if err := q.CreateSession(ctx, db.CreateSessionParams{TokenHash: hash, UserID: userID, ExpiresAt: exp}); err != nil {
+		return "", time.Time{}, err
 	}
-	return view(u), token, exp, nil
+	return token, exp, nil
+}
+
+// cleanName trims a display name and caps its length; "" means unusable.
+func cleanName(n string) (string, bool) {
+	n = strings.TrimSpace(n)
+	if utf8.RuneCountInString(n) > maxName {
+		n = string([]rune(n)[:maxName])
+	}
+	return n, n != ""
 }
 
 // Session resolves a session token. renewed is non-zero when the expiry was

@@ -71,3 +71,18 @@ func TestLoadAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadTrimsPastedValues(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x?sslmode=require\n\n")
+	t.Setenv("PUBLIC_URL", "https://split.example/\n")
+	t.Setenv("AUTH_PROVIDER", "google")
+	t.Setenv("GOOGLE_CLIENT_ID", " id\n")
+	t.Setenv("GOOGLE_CLIENT_SECRET", "secret\r\n")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DatabaseURL != "postgres://x?sslmode=require" || cfg.PublicURL != "https://split.example" || cfg.GoogleClientID != "id" || cfg.GoogleClientSecret != "secret" {
+		t.Fatalf("%+v", cfg)
+	}
+}

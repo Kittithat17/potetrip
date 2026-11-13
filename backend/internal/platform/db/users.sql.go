@@ -144,8 +144,8 @@ RETURNING id, google_sub, email, name, picture, created_at, last_login_at
 `
 
 type UpsertUserParams struct {
-	GoogleSub string  `json:"google_sub"`
-	Email     string  `json:"email"`
+	GoogleSub *string `json:"google_sub"`
+	Email     *string `json:"email"`
 	Name      string  `json:"name"`
 	Picture   *string `json:"picture"`
 }

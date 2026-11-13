@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -25,6 +26,7 @@ type Pinger interface {
 type Deps struct {
 	DB          Pinger
 	Auth        *auth.Service
+	Passkeys    *auth.Passkeys // nil disables passkey sign-in
 	AuthCfg     AuthConfig
 	Trips       *trip.Service
 	Expenses    *expense.Service
@@ -64,8 +66,19 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/google/callback", s.googleCallback)
 			r.Post("/mock", s.mockLogin)
 			r.Post("/logout", s.logout)
-			r.With(s.requireUser).Get("/me", s.authMe)
-			r.With(s.requireUser).Post("/claim", s.claimDevices)
+			r.Post("/passkey/signup/begin", s.passkeySignupBegin)
+			r.Post("/passkey/signup/finish", s.passkeySignupFinish)
+			r.Post("/passkey/login/begin", s.passkeyLoginBegin)
+			r.Post("/passkey/login/finish", s.passkeyLoginFinish)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireUser)
+				r.Get("/me", s.authMe)
+				r.Post("/claim", s.claimDevices)
+				r.Post("/passkey/register/begin", s.passkeyRegisterBegin)
+				r.Post("/passkey/register/finish", s.passkeyRegisterFinish)
+				r.Get("/passkeys", s.listPasskeys)
+				r.Delete("/passkeys/{id}", s.deletePasskey)
+			})
 		})
 
 		// Everything else needs a signed-in user.
@@ -129,6 +142,8 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	if err := s.DB.Ping(ctx); err != nil {
+		// pgx error text never includes the password.
+		slog.WarnContext(r.Context(), "health check: database unreachable", "err", err)
 		writeError(w, http.StatusServiceUnavailable, "db_unavailable", "database is not reachable")
 		return
 	}

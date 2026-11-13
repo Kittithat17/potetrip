@@ -9,8 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/raisin/travel-split/backend/internal/platform/db"
 	"github.com/raisin/travel-split/backend/internal/domain/slip"
+	"github.com/raisin/travel-split/backend/internal/platform/db"
 	"github.com/raisin/travel-split/backend/internal/platform/testdb"
 )
 

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/raisin/travel-split/backend/internal/platform/db"
 	"github.com/raisin/travel-split/backend/internal/domain/fx"
+	"github.com/raisin/travel-split/backend/internal/platform/db"
 	"github.com/raisin/travel-split/backend/internal/platform/testdb"
 )
 

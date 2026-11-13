@@ -8,10 +8,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/raisin/travel-split/backend/internal/platform/apperr"
-	"github.com/raisin/travel-split/backend/internal/platform/db"
 	"github.com/raisin/travel-split/backend/internal/domain/expense"
 	"github.com/raisin/travel-split/backend/internal/domain/trip"
+	"github.com/raisin/travel-split/backend/internal/platform/apperr"
+	"github.com/raisin/travel-split/backend/internal/platform/db"
 )
 
 // ---- trips, members & joining ----

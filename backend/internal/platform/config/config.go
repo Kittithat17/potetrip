@@ -40,18 +40,18 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		Port:         getenv("PORT", "8080"),
-		DatabaseURL:  os.Getenv("DATABASE_URL"),
+		DatabaseURL:  env("DATABASE_URL"),
 		SlipProvider: getenv("SLIP_PROVIDER", "gemini"),
-		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:  os.Getenv("GEMINI_MODEL"),
+		GeminiAPIKey: env("GEMINI_API_KEY"),
+		GeminiModel:  env("GEMINI_MODEL"),
 		FXBaseURL:    getenv("FX_BASE_URL", "https://api.frankfurter.dev/v1"),
 
 		AuthProvider:       getenv("AUTH_PROVIDER", "google"),
-		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
-		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		GoogleClientID:     env("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret: env("GOOGLE_CLIENT_SECRET"),
 		PublicURL:          strings.TrimRight(getenv("PUBLIC_URL", "http://localhost:5173"), "/"),
-		StaticDir:          os.Getenv("STATIC_DIR"),
-		MigrateOnStart:     os.Getenv("MIGRATE_ON_START") == "true",
+		StaticDir:          env("STATIC_DIR"),
+		MigrateOnStart:     env("MIGRATE_ON_START") == "true",
 	}
 	if cfg.DatabaseURL == "" {
 		return cfg, errors.New("DATABASE_URL is required")
@@ -88,8 +88,12 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+// env reads a variable without surrounding spaces or newlines, which easily
+// sneak in when values are pasted into a hosting dashboard.
+func env(key string) string { return strings.TrimSpace(os.Getenv(key)) }
+
 func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
+	if v := env(key); v != "" {
 		return v
 	}
 	return def

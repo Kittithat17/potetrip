@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AuthChallenge struct {
+	TokenHash []byte     `json:"token_hash"`
+	Kind      string     `json:"kind"`
+	UserID    *uuid.UUID `json:"user_id"`
+	Name      *string    `json:"name"`
+	Session   []byte     `json:"session"`
+	ExpiresAt time.Time  `json:"expires_at"`
+}
+
 type Device struct {
 	ID                uuid.UUID  `json:"id"`
 	TripID            uuid.UUID  `json:"trip_id"`
@@ -74,6 +83,15 @@ type Member struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type Passkey struct {
+	ID         []byte     `json:"id"`
+	UserID     uuid.UUID  `json:"user_id"`
+	Credential []byte     `json:"credential"`
+	Name       string     `json:"name"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+}
+
 type Session struct {
 	TokenHash []byte    `json:"token_hash"`
 	UserID    uuid.UUID `json:"user_id"`
@@ -111,8 +129,8 @@ type Trip struct {
 
 type User struct {
 	ID          uuid.UUID `json:"id"`
-	GoogleSub   string    `json:"google_sub"`
-	Email       string    `json:"email"`
+	GoogleSub   *string   `json:"google_sub"`
+	Email       *string   `json:"email"`
 	Name        string    `json:"name"`
 	Picture     *string   `json:"picture"`
 	CreatedAt   time.Time `json:"created_at"`
