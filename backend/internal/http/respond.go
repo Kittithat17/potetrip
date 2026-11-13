@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/raisin/travel-split/backend/internal/apperr"
+	"github.com/raisin/travel-split/backend/internal/platform/apperr"
 )
 
 const maxJSONBody = 1 << 20

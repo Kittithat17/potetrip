@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/raisin/travel-split/backend/internal/apperr"
+	"github.com/raisin/travel-split/backend/internal/platform/apperr"
 )
 
 // fxRate: GET /fx?from=CNY&to=THB[&date=2026-11-12]. Public: rates aren't trip data.

@@ -11,11 +11,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/raisin/travel-split/backend/internal/auth"
-	"github.com/raisin/travel-split/backend/internal/expense"
-	"github.com/raisin/travel-split/backend/internal/settlement"
-	"github.com/raisin/travel-split/backend/internal/testdb"
-	"github.com/raisin/travel-split/backend/internal/trip"
+	"github.com/raisin/travel-split/backend/internal/domain/auth"
+	"github.com/raisin/travel-split/backend/internal/domain/expense"
+	"github.com/raisin/travel-split/backend/internal/domain/settlement"
+	"github.com/raisin/travel-split/backend/internal/platform/testdb"
+	"github.com/raisin/travel-split/backend/internal/domain/trip"
 )
 
 type apiClient struct {

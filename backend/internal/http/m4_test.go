@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/raisin/travel-split/backend/internal/apperr"
-	"github.com/raisin/travel-split/backend/internal/expense"
-	"github.com/raisin/travel-split/backend/internal/fx"
+	"github.com/raisin/travel-split/backend/internal/platform/apperr"
+	"github.com/raisin/travel-split/backend/internal/domain/expense"
+	"github.com/raisin/travel-split/backend/internal/domain/fx"
 )
 
 // fakeRates serves fixed rates and records the day it was asked about.

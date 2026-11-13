@@ -14,8 +14,8 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/raisin/travel-split/backend/internal/apperr"
-	"github.com/raisin/travel-split/backend/internal/auth"
+	"github.com/raisin/travel-split/backend/internal/platform/apperr"
+	"github.com/raisin/travel-split/backend/internal/domain/auth"
 )
 
 const (

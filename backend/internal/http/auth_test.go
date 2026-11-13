@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/raisin/travel-split/backend/internal/auth"
-	"github.com/raisin/travel-split/backend/internal/testdb"
+	"github.com/raisin/travel-split/backend/internal/domain/auth"
+	"github.com/raisin/travel-split/backend/internal/platform/testdb"
 )
 
 func TestSafeNext(t *testing.T) {

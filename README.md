@@ -3,7 +3,7 @@
 เว็บแอป (PWA) หารค่าใช้จ่ายตอนเที่ยวกับเพื่อน อ่านสลิปด้วย AI และรองรับหลายสกุลเงิน
 สเปกเต็มอยู่ที่ `TRAVEL_SPLIT_SPEC.md`
 
-> **สถานะ:** Milestone 4 (หลายสกุลเงิน + รายเมนู + QR) และระบบเข้าสู่ระบบด้วย Google เสร็จแล้ว สร้างทริป ชวนเพื่อน บันทึกรายจ่ายสกุลไหนก็ได้ (แปลงเป็นสกุลหลักด้วยเรตของวันที่จ่าย หรือใส่เรตเอง) หารเท่ากัน ระบุยอด หรือรายเมนู สแกนสลิปให้ AI อ่าน (ดึงรายการเมนูจากใบเสร็จได้) เคลียร์เงินพร้อม QR พร้อมเพย์ และดูหน้าสรุปพร้อมกราฟ
+> **สถานะ:** Milestone 4 (หลายสกุลเงิน + รายเมนู + QR), ระบบเข้าสู่ระบบด้วย Google และชุด deploy (Docker + Render + Supabase) เสร็จแล้ว สร้างทริป ชวนเพื่อน บันทึกรายจ่ายสกุลไหนก็ได้ (แปลงเป็นสกุลหลักด้วยเรตของวันที่จ่าย หรือใส่เรตเอง) หารเท่ากัน ระบุยอด หรือรายเมนู สแกนสลิปให้ AI อ่าน (ดึงรายการเมนูจากใบเสร็จได้) เคลียร์เงินพร้อม QR พร้อมเพย์ และดูหน้าสรุปพร้อมกราฟ
 
 ## สิ่งที่ต้องมีในเครื่อง
 
@@ -64,26 +64,52 @@ curl localhost:8081/api/v1/healthz   # เหมือนกัน
 
 ```
 backend/
-  cmd/api/            จุดเริ่มโปรแกรม
-  internal/config/    โหลด env
-  internal/trip/      ทริปและสมาชิก
-  internal/expense/   รายจ่าย + การแบ่งเงิน (Allocate/SplitEqual)
-  internal/settlement/ คำนวณยอดสุทธิและรายการโอน (มี unit test ตามสเปกหัวข้อ 7)
-  internal/money/     ตารางสกุลเงิน จำนวนทศนิยม และ ParseDecimal
-  internal/fx/        อัตราแลกเปลี่ยน: Provider (Frankfurter) + cache ใน DB
-  internal/slip/      Reader interface, GeminiReader, MockReader, RetryReader, ประมวลผลขนาน
-  internal/apperr/    error ของ domain ที่ map เป็น HTTP status
-  internal/testdb/    สร้าง schema ชั่วคราวสำหรับ integration test
-  internal/http/      routes, middleware, handlers
-  internal/db/        โค้ดที่ sqlc generate (ห้ามแก้มือ)
-  migrations/         goose migrations (schema ทั้งหมดตามสเปกหัวข้อ 4)
-  queries/            SQL สำหรับ sqlc
-  tools/go.mod        ล็อกเวอร์ชัน sqlc และ goose
-frontend/
-  src/api/            API client (แปลง error format เป็น ApiError)
-  src/components/     คอมโพเนนต์
-  src/pages/          หน้าจอ
-docker-compose.yml    Postgres 17 สำหรับ dev
+  cmd/api/                  จุดเริ่มโปรแกรม (+ migration ตอนเริ่มถ้าตั้ง MIGRATE_ON_START)
+  internal/
+    domain/                 กฎของแอป ไม่รู้จัก HTTP
+      auth/                 ผู้ใช้, session, Google OAuth
+      trip/                 ทริป สมาชิก คำขอเข้าทริป
+      expense/              รายจ่าย + การแบ่งเงิน (เท่ากัน / ระบุยอด / รายเมนู)
+      settlement/           ยอดสุทธิและรายการโอนที่น้อยที่สุด
+      slip/                 AI อ่านสลิป (Gemini, mock, retry, ประมวลผลขนาน)
+      fx/                   อัตราแลกเปลี่ยน (Frankfurter + cache ใน DB)
+    platform/               ของพื้นฐานที่ทุก domain ใช้
+      config/               โหลด env
+      db/                   โค้ดที่ sqlc generate (ห้ามแก้มือ)
+      money/                สกุลเงิน ทศนิยม การแปลงเรต
+      apperr/               error ที่ map เป็น HTTP status
+      testdb/               schema ชั่วคราวสำหรับ integration test
+    http/                   routes, middleware, handlers, เสิร์ฟหน้าเว็บ (production)
+  migrations/               goose migrations
+  queries/                  SQL สำหรับ sqlc
+  tools/go.mod              ล็อกเวอร์ชัน sqlc และ goose
+frontend/src/
+  app/                      App (routes), main, แท็บล่าง
+  api/                      client (คุกกี้ + header กัน CSRF), endpoints, hooks, types
+  features/                 แต่ละหน้าจอ พร้อม logic และ test ของมันเอง
+    auth/                   หน้าล็อกอิน, AuthGate, ย้าย token แบบเก่า
+    home/                   หน้าแรก, ทริปของฉัน, สร้างทริป
+    settings/               ตั้งค่าแอป (บัญชี, ภาษา)
+    convert/                แลกเงิน
+    trip/                   ทุกอย่างในทริป
+      layout/               TripLayout + context ของทริป
+      join/                 ขอเข้าทริป, อนุมัติคำขอ, ลิงก์เชิญ
+      dashboard/            หน้าภาพรวม
+      expenses/             ฟอร์มรายจ่าย, การหาร (split.ts), หมวดหมู่
+      scan/                 สแกนสลิป, ย่อรูป
+      settle/               เคลียร์เงิน, QR พร้อมเพย์
+      summary/              สรุปพร้อมกราฟ
+      convert/              แลกเงินในทริป
+      settings/             ตั้งค่าทริป
+  components/               คอมโพเนนต์ที่ใช้ร่วมกัน
+    ui/                     ปุ่ม ฟอร์ม Dialog โครงหน้า
+    feedback/               กล่องยืนยัน, สถานะเซิร์ฟเวอร์
+    money/                  แสดงยอดประมาณเป็นบาท
+  lib/                      ฟังก์ชันทั่วไป (เงิน วันที่ คัดลอก ลิงก์เชิญ สกุลเงิน)
+  i18n/                     ภาษาไทย / อังกฤษ
+Dockerfile                  image production (หน้าเว็บ + API)
+render.yaml                 ตั้งค่า Render
+docker-compose.yml          Postgres 17 สำหรับ dev
 ```
 
 ## AI อ่านสลิป (M3)
@@ -207,6 +233,50 @@ Base path `/api/v1` ทุก endpoint (ยกเว้น `healthz` และ `
 ใน `exact` และ `items` ยอดของแต่ละคน/แต่ละรายการเป็นสกุลของรายจ่าย (`currency`) ส่วน `shares` ที่ API คืนมาเป็นสกุลหลักของทริปเสมอ
 
 เศษจากการหารเท่ากันจะเพิ่มทีละ 1 หน่วยย่อยให้สมาชิกตามลำดับที่เข้าทริป ผลรวม `shares` จึงเท่ากับ `amount_base` เสมอ
+
+## Deploy (Render + Supabase แบบฟรี)
+
+โครงสร้าง: เว็บกับ API อยู่ใน Docker image เดียวกัน (`Dockerfile`) รันบน **Render** แบบฟรีที่ region สิงคโปร์ ฐานข้อมูลใช้ **Supabase** แบบฟรี ทั้งหมดอยู่โดเมนเดียว (`https://<ชื่อ>.onrender.com`) ตามที่คุกกี้ล็อกอินต้องการ
+
+ทั้งสองบริการแบบฟรีจะหลับเมื่อไม่มีคนใช้: Render หลับหลังว่าง 15 นาที ส่วน Supabase จะ pause หลังว่างประมาณ 7 วัน จึงต้องตั้ง **ping ทุก 10 นาที** ไปที่ `/healthz` ซึ่ง query ฐานข้อมูลด้วย ทั้งสองตัวจะได้ไม่หลับ วิธีนี้ใช้กันทั่วไป แต่ผู้ให้บริการไม่ได้การันตี
+
+**1. Supabase**
+- ตอนสร้างโปรเจกต์ ให้เลือก region Southeast Asia (Singapore) **ปิด Data API** และ**เปิด automatic RLS** (แอปเราไม่ได้ใช้ supabase-js ถ้าเปิด Data API ไว้ คนนอกอาจเข้าถึงตารางได้โดยไม่ผ่าน backend)
+- กดปุ่ม **Connect** แล้วคัดลอก connection string แบบ **Session pooler** (พอร์ต 5432) แล้วต่อท้ายด้วย `?sslmode=require`
+- **ห้ามใช้ Transaction pooler (6543)** เพราะ pgx ใช้ prepared statement
+
+**2. สร้างตารางบน Supabase (migration)** เลือกทางใดทางหนึ่ง:
+- ตั้ง `MIGRATE_ON_START=true` ใน Render สำหรับการ deploy ครั้งแรก แล้วเปลี่ยนกลับเป็น `false` หรือ
+- รันจากเครื่องตัวเอง: `make migrate DATABASE_URL="<connection string>"`
+
+**3. Render**
+- push โค้ดขึ้น GitHub แล้วไปที่ Render เลือก **New → Blueprint** แล้วเลือก repo นี้ Render จะอ่าน `render.yaml` เอง
+- ใส่ค่าลับที่ Render ถาม: `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GEMINI_API_KEY`, `GEMINI_MODEL` และ `PUBLIC_URL`
+  - `PUBLIC_URL` คือ URL ที่ Render ให้ เช่น `https://travel-split.onrender.com` ห้ามมี `/` ท้าย
+- เมื่อ `PUBLIC_URL` เป็น https คุกกี้จะเป็น `Secure` และใช้ชื่อแบบ `__Host-` อัตโนมัติ ส่วนโหมด mock ใช้ไม่ได้
+
+**4. Google Cloud Console**
+- เพิ่ม Authorized redirect URI: `https://<ชื่อ>.onrender.com/api/v1/auth/google/callback`
+- กด **Publish app** เพื่อให้ทุกคนล็อกอินได้ หรือเพิ่มอีเมลเพื่อนใน Test users ทีละคน
+
+**5. Ping กันหลับ**
+- สมัคร [cron-job.org](https://cron-job.org) (ฟรี) แล้วสร้าง job: `GET https://<ชื่อ>.onrender.com/healthz` ทุก 10 นาที
+- ไม่ได้ใช้ GitHub Actions เพราะถ้า repo เป็น private การรันทุก 10 นาทีจะใช้นาทีฟรีหมด
+
+**6. สำรองข้อมูล** (Supabase แบบฟรีไม่มีไฟล์สำรองให้ดาวน์โหลด)
+```bash
+make backup BACKUP_DATABASE_URL="<connection string ของ Supabase>"   # ได้ไฟล์ backups/travel-<เวลา>.dump
+# กู้คืน: pg_restore --no-owner --clean --if-exists -d "<connection string>" backups/<ไฟล์>.dump
+```
+โฟลเดอร์ `backups/` อยู่ใน `.gitignore` ไฟล์สำรองมีข้อมูลผู้ใช้ จึงควรเก็บไว้ในที่ปลอดภัย
+
+**ลองรัน image production ในเครื่อง:** `make docker-run` แล้วเปิด http://localhost:8090 (ใช้ล็อกอินแบบ mock กับ DB ใน Docker)
+
+**ความปลอดภัยของหน้าเว็บ:** backend ส่ง header ต่อไปนี้มากับหน้าเว็บ
+- `Content-Security-Policy`: โหลดสคริปต์ได้จากเว็บเราเท่านั้น ยกเว้น Google Fonts กับรูปโปรไฟล์ Google
+- `X-Frame-Options: DENY` และ `frame-ancestors 'none'`: กันเว็บอื่นเอาแอปไปฝังใน iframe
+- `Strict-Transport-Security`: บังคับใช้ https
+- ไฟล์ใน `/assets/` cache ได้ 1 ปี เพราะชื่อไฟล์มี hash เปลี่ยนทุกครั้งที่ build
 
 ## Environment variables
 

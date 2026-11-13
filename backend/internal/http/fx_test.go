@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/raisin/travel-split/backend/internal/db"
-	"github.com/raisin/travel-split/backend/internal/fx"
-	"github.com/raisin/travel-split/backend/internal/testdb"
+	"github.com/raisin/travel-split/backend/internal/platform/db"
+	"github.com/raisin/travel-split/backend/internal/domain/fx"
+	"github.com/raisin/travel-split/backend/internal/platform/testdb"
 )
 
 type stubFX struct{ calls int }

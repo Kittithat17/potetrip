@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,16 +13,19 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
+	"github.com/pressly/goose/v3"
 
-	"github.com/raisin/travel-split/backend/internal/auth"
-	"github.com/raisin/travel-split/backend/internal/config"
-	"github.com/raisin/travel-split/backend/internal/db"
-	"github.com/raisin/travel-split/backend/internal/expense"
-	"github.com/raisin/travel-split/backend/internal/fx"
+	"github.com/raisin/travel-split/backend/internal/domain/auth"
+	"github.com/raisin/travel-split/backend/internal/platform/config"
+	"github.com/raisin/travel-split/backend/internal/platform/db"
+	"github.com/raisin/travel-split/backend/internal/domain/expense"
+	"github.com/raisin/travel-split/backend/internal/domain/fx"
 	apihttp "github.com/raisin/travel-split/backend/internal/http"
-	"github.com/raisin/travel-split/backend/internal/settlement"
-	"github.com/raisin/travel-split/backend/internal/slip"
-	"github.com/raisin/travel-split/backend/internal/trip"
+	"github.com/raisin/travel-split/backend/internal/domain/settlement"
+	"github.com/raisin/travel-split/backend/internal/domain/slip"
+	"github.com/raisin/travel-split/backend/internal/domain/trip"
+	"github.com/raisin/travel-split/backend/migrations"
 )
 
 func main() {
@@ -39,6 +43,12 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if cfg.MigrateOnStart {
+		if err := migrate(ctx, cfg.DatabaseURL); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
 
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -77,6 +87,7 @@ func run() error {
 			Slips:       slips,
 			FX:          rates,
 			CORSOrigins: cfg.CORSOrigins,
+			StaticDir:   cfg.StaticDir,
 		}).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -99,6 +110,24 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// migrate applies pending migrations (embedded in the binary) with goose.
+func migrate(ctx context.Context, dsn string) error {
+	sqlDB, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sqlDB.Close() }()
+	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS)
+	if err != nil {
+		return err
+	}
+	results, err := provider.Up(ctx)
+	for _, r := range results {
+		slog.Info("migration applied", "version", r.Source.Version, "file", r.Source.Path, "took", r.Duration)
+	}
+	return err
 }
 
 // newSlipReader picks the AI provider from SLIP_PROVIDER. A missing API key

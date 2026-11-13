@@ -13,7 +13,7 @@ GOOSE    := cd backend && $(GO_TOOL) goose -dir migrations postgres "$(DATABASE_
 
 .PHONY: help setup dev dev-lan dev-backend db-up-local db-check dev-frontend db-up db-down db-reset \
         migrate migrate-down migrate-status migrate-new sqlc test test-backend \
-        test-frontend test-unit lint build
+        test-frontend test-unit lint build docker-build docker-run backup
 
 help: ## แสดงคำสั่งทั้งหมด
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -96,3 +96,30 @@ lint: ## go vet + golangci-lint + tsc + oxlint
 build: ## build backend binary + frontend dist
 	cd backend && go build -o bin/api ./cmd/api
 	cd frontend && pnpm build
+
+# ---- production image & backups ----
+
+# pg_dump must be at least as new as the server (Supabase runs Postgres 17).
+PG_IMAGE ?= postgres:17-alpine
+# Defaults to DATABASE_URL; set BACKUP_DATABASE_URL to back up another DB.
+BACKUP_DATABASE_URL ?= $(DATABASE_URL)
+
+docker-build: ## build image สำหรับ production (หน้าเว็บ + API ใน image เดียว)
+	docker build -t travel-split .
+
+docker-run: docker-build db-up-local ## ลองรัน image production ที่ http://localhost:8090 (login แบบ mock, DB ใน Docker)
+	docker run --rm -p 8090:8080 \
+	  -e DATABASE_URL="postgres://travel:travel@host.docker.internal:5440/travel?sslmode=disable" \
+	  -e AUTH_PROVIDER=mock -e PUBLIC_URL=http://localhost:8090 -e SLIP_PROVIDER=mock \
+	  travel-split
+
+# Dumps to a .partial file first and renames it only when pg_dump succeeded,
+# so a failed run never looks like a good backup.
+backup: ## สำรอง DB เป็นไฟล์ backups/travel-<เวลา>.dump (ใช้ BACKUP_DATABASE_URL หรือ DATABASE_URL)
+	@test -n "$(BACKUP_DATABASE_URL)" || (echo "ตั้ง BACKUP_DATABASE_URL หรือ DATABASE_URL ก่อน" && exit 1)
+	@mkdir -p backups
+	@f=backups/travel-$$(date +%Y%m%d-%H%M%S).dump; \
+	  docker run --rm --add-host=host.docker.internal:host-gateway -e PGURL="$(BACKUP_DATABASE_URL)" $(PG_IMAGE) \
+	    sh -c 'pg_dump --format=custom --no-owner --no-privileges "$$(echo "$$PGURL" | sed s/localhost/host.docker.internal/)"' > $$f.partial \
+	  && test -s $$f.partial && mv $$f.partial $$f && echo "สำรองแล้ว: $$f ($$(du -h $$f | cut -f1))" \
+	  || (echo "สำรองไม่สำเร็จ (ไฟล์ที่ไม่สมบูรณ์อยู่ที่ $$f.partial)"; exit 1)

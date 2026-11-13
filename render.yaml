@@ -1,0 +1,35 @@
+# Render Blueprint: one free web service in Singapore built from ./Dockerfile.
+# Values marked sync: false are secrets; Render asks for them on first deploy
+# and they never live in this repo.
+services:
+  - type: web
+    name: travel-split
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL # Supabase "Session pooler" connection string
+        sync: false
+      - key: PUBLIC_URL # e.g. https://travel-split.onrender.com (no trailing slash)
+        sync: false
+      - key: AUTH_PROVIDER
+        value: google
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: SLIP_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      - key: SLIP_CONCURRENCY
+        value: "3"
+      # Apply pending DB migrations on start. Off by default: turn it on for
+      # the deploy that should migrate, then off again.
+      - key: MIGRATE_ON_START
+        value: "false"

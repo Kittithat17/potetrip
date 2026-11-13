@@ -9,12 +9,12 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"github.com/raisin/travel-split/backend/internal/auth"
-	"github.com/raisin/travel-split/backend/internal/expense"
-	"github.com/raisin/travel-split/backend/internal/fx"
-	"github.com/raisin/travel-split/backend/internal/settlement"
-	"github.com/raisin/travel-split/backend/internal/slip"
-	"github.com/raisin/travel-split/backend/internal/trip"
+	"github.com/raisin/travel-split/backend/internal/domain/auth"
+	"github.com/raisin/travel-split/backend/internal/domain/expense"
+	"github.com/raisin/travel-split/backend/internal/domain/fx"
+	"github.com/raisin/travel-split/backend/internal/domain/settlement"
+	"github.com/raisin/travel-split/backend/internal/domain/slip"
+	"github.com/raisin/travel-split/backend/internal/domain/trip"
 )
 
 // Pinger is the subset of the DB pool the health check needs.
@@ -32,6 +32,7 @@ type Deps struct {
 	Slips       *slip.Service // nil when no AI provider is configured
 	FX          *fx.Service
 	CORSOrigins []string
+	StaticDir   string // built web app to serve (production); empty in dev, where Vite serves it
 }
 
 type Server struct {
@@ -87,7 +88,7 @@ func (s *Server) Routes() http.Handler {
 					r.Group(func(r chi.Router) {
 						r.Use(s.requireDevice)
 						r.Get("/me", s.me) // pending devices poll this
-					r.Delete("/me", s.leave)
+						r.Delete("/me", s.leave)
 
 						r.Group(func(r chi.Router) {
 							r.Use(s.requireMember)
@@ -117,6 +118,10 @@ func (s *Server) Routes() http.Handler {
 			})
 		})
 	})
+	if s.StaticDir != "" {
+		r.NotFound(spa(s.StaticDir, s.AuthCfg.secure()).ServeHTTP)
+		r.MethodNotAllowed(spa(s.StaticDir, s.AuthCfg.secure()).ServeHTTP)
+	}
 	return r
 }
 
